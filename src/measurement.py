@@ -1,62 +1,69 @@
-"""Semantic measurement via SBERT embeddings."""
+"""
+Semantic measurement via SBERT embeddings.
 
+Converts opinion text to vectors and computes semantic variance (spread from centroid).
+Model is cached after first load. Suppresses Hugging Face / transformers verbose output.
+"""
+
+import logging
+import os
+import warnings
 from typing import Optional
 
 import numpy as np
+
+os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
+os.environ.setdefault("HF_HUB_VERBOSITY", "error")
+os.environ.setdefault("TRANSFORMERS_NO_ADVISORY_WARNINGS", "1")
+warnings.filterwarnings("ignore", message=".*unauthenticated.*")
+warnings.filterwarnings("ignore", module="transformers")
+logging.getLogger("transformers").setLevel(logging.ERROR)
+logging.getLogger("sentence_transformers").setLevel(logging.ERROR)
+
 from sentence_transformers import SentenceTransformer
 
-
-def _get_model() -> SentenceTransformer:
-    """Load SBERT model (cached after first call)."""
-    return SentenceTransformer("all-MiniLM-L6-v2")
+_model_cache: Optional["SentenceTransformer"] = None
 
 
-def embed_opinions(opinions: list[str], model: Optional[SentenceTransformer] = None) -> np.ndarray:
+def _get_model(show_progress: bool = True) -> "SentenceTransformer":
+    """Load SBERT model (cached). Suppresses tqdm during load."""
+    global _model_cache
+    if _model_cache is not None:
+        return _model_cache
+    if show_progress:
+        print("Loading SBERT model...", end=" ", flush=True)
+    old = os.environ.pop("TQDM_DISABLE", None)
+    os.environ["TQDM_DISABLE"] = "1"
+    try:
+        _model_cache = SentenceTransformer("all-MiniLM-L6-v2")
+    finally:
+        os.environ.pop("TQDM_DISABLE", None)
+        if old is not None:
+            os.environ["TQDM_DISABLE"] = old
+    if show_progress:
+        print("done.")
+    return _model_cache
+
+
+def embed_opinions(
+    opinions: list[str],
+    model: Optional["SentenceTransformer"] = None,
+    show_progress_bar: bool = False,
+) -> np.ndarray:
     """
-    Map opinion texts to embedding vectors using SBERT.
-
-    Args:
-        opinions: List of opinion strings
-        model: Optional pre-loaded model (loads default if None)
+    Map opinion strings to SBERT embedding vectors.
 
     Returns:
-        Array of shape (n_opinions, embedding_dim)
+        Array of shape (n_opinions, embedding_dim).
     """
     if model is None:
         model = _get_model()
-    return model.encode(opinions, convert_to_numpy=True)
+    return model.encode(opinions, convert_to_numpy=True, show_progress_bar=show_progress_bar)
 
 
 def semantic_variance(embeddings: np.ndarray) -> float:
     """
-    Compute semantic variance (mean squared distance from centroid).
-
-    Args:
-        embeddings: Array of shape (n, dim)
-
-    Returns:
-        Semantic variance scalar
+    Mean squared distance from centroid. Higher = more polarized/diverse opinions.
     """
     centroid = embeddings.mean(axis=0)
     return float(np.mean(np.sum((embeddings - centroid) ** 2, axis=1)))
-
-
-def semantic_polarization(embeddings: np.ndarray) -> float:
-    """
-    Semantic polarization: standard deviation of pairwise cosine distances
-    (alternative: mean pairwise distance). Higher = more polarized.
-
-    Here we use the mean pairwise Euclidean distance for interpretability.
-    """
-    n = len(embeddings)
-    if n < 2:
-        return 0.0
-    diffs = embeddings[:, None, :] - embeddings[None, :, :]
-    norms = np.sqrt(np.sum(diffs ** 2, axis=2))
-    return float(np.mean(norms[np.triu_indices(n, k=1)]))
-
-
-def embedding_distances_from_centroid(embeddings: np.ndarray) -> np.ndarray:
-    """Per-opinion distance from centroid (for analysis)."""
-    centroid = embeddings.mean(axis=0)
-    return np.sqrt(np.sum((embeddings - centroid) ** 2, axis=1))

@@ -1,4 +1,9 @@
-"""Configuration and constants for the simulation."""
+"""
+Configuration and constants for the simulation.
+
+Loads .env for Ollama and HF settings. Defines persona prompts (aligned with SBM blocks:
+left, center_left, center_right, right) and simulation defaults.
+"""
 
 import os
 from pathlib import Path
@@ -7,17 +12,18 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).parent.parent / ".env")
 
-# API Keys
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
+# Ollama (local LLM). No API key required.
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.2:3b")
 
-# Network settings
-DEFAULT_N = 20  # SBM: 4 blocks × 5 nodes
+# Network: SBM has 20 nodes, 4 blocks × 5 nodes each
+DEFAULT_N = 20
 
-# Simulation
+# Simulation defaults
 DEFAULT_TOPIC = "AI Regulation"
 DEFAULT_STEPS = 5
 
-# Persona templates aligned with SBM blocks: left, center_left, center_right, right
+# Persona prompts for each block. Used to initialize agents and steer LLM responses.
 PERSONAS = [
     {
         "name": "left",
