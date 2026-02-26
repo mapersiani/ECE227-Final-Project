@@ -31,36 +31,35 @@ def _ollama_generate(prompt: str) -> str:
         raise
     return (data.get("response") or "").strip()
 
-
 def get_updated_opinion(
     persona: str,
     topic: str,
     neighbor_opinions: Sequence[str],
     memory: str = "",
+    style: str = "",
 ) -> str:
     """
-    Ask Ollama for an updated opinion given persona, topic, and neighbor opinions.
-
+    Ask Ollama for an updated opinion given persona, topic, neighbor opinions, and style.
     Args:
-        persona: Agent's persona prompt
+        persona: Agent's persona prompt (character brief)
         topic: Discussion topic (e.g. "AI Regulation")
         neighbor_opinions: List of neighbor opinion texts
         memory: Optional prior context
-
+        style: Rhetorical style instruction (e.g. "Use moral urgency. Center workers.")
     Returns:
         New opinion text (1–2 sentences).
     """
     neighbor_text = "\n".join(f"- Neighbor {i + 1}: {o}" for i, o in enumerate(neighbor_opinions))
     memory_line = f"\nPrevious context or memory: {memory}\n" if memory else ""
+    style_line = f"\nRhetorical style instruction: {style}\n" if style else ""
+
     prompt = f"""You are simulating an agent in a social network opinion dynamics experiment.
-
 {persona}
-
 The topic under discussion is: {topic}
-
 You have just read the following opinions from your neighbors:
-
 {neighbor_text}
-{memory_line}
+{memory_line}{style_line}
 In 1-2 concise sentences, state your updated opinion on this topic. Reflect how you are influenced by your neighbors' arguments (or lack thereof), but stay in character. Output only the opinion text, no meta-commentary."""
+
     return _ollama_generate(prompt)
+

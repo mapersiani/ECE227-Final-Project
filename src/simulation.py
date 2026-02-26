@@ -15,17 +15,15 @@ from src.config import DEFAULT_TOPIC, PERSONAS
 from src.llm_client import get_updated_opinion
 from src.measurement import embed_opinions, semantic_variance
 
+_PERSONA_MAP = {p["name"]: p for p in PERSONAS}
 
 def _initial_opinion_for_persona(persona_name: str, topic: str) -> str:
     """Templated initial opinion for persona. Could be replaced with one-shot LLM call."""
-    templates = {
-        "left": f"On {topic}, I support strong regulation to protect the public and curb corporate overreach.",
-        "center_left": f"On {topic}, I favor regulation that enables innovation while safeguarding society.",
-        "center_right": f"On {topic}, I prefer light-touch regulation that lets markets lead with targeted oversight.",
-        "right": f"On {topic}, I oppose heavy regulation; voluntary standards and markets are sufficient.",
-    }
-    return templates.get(persona_name, f"I have mixed feelings about {topic}.")
-
+    persona = _PERSONA_MAP.get(persona_name)
+    if persona and "initial" in persona:
+        return persona["initial"]
+    # Fallback for any unknown persona
+    return f"I have mixed feelings about {topic}."
 
 def create_agents(G: nx.Graph, topic: str = DEFAULT_TOPIC, seed: Optional[int] = None) -> List[Agent]:
     """
@@ -48,16 +46,25 @@ def step_semantic(G: nx.Graph, agents: List[Agent], topic: str, memory: str = ""
     Updates agents in place.
     """
     opinions = [a.current_opinion for a in agents]
+    blocks = nx.get_node_attributes(G, "block")
+
     for i in range(G.number_of_nodes()):
         neighbors = list(G.neighbors(i))
         neighbor_opinions = [opinions[j] for j in neighbors]
         if not neighbor_opinions:
             continue
+
+        # Look up the style field for this agent's persona
+        block = blocks.get(i, 0)
+        p = PERSONAS[min(block, len(PERSONAS) - 1)]
+        style = p.get("style", "")
+
         new = get_updated_opinion(
             persona=agents[i].persona_prompt,
             topic=topic,
             neighbor_opinions=neighbor_opinions,
             memory=memory,
+            style=style,
         )
         agents[i].update_opinion(new)
 
@@ -72,12 +79,10 @@ def run_semantic(
 ) -> List[float]:
     """
     Run semantic simulation for `steps` steps.
-
     Returns:
         List of semantic variance values (t=0 through t=steps).
     """
     from tqdm import tqdm
-
     variances = []
     opinions = [a.current_opinion for a in agents]
     variances.append(semantic_variance(embed_opinions(opinions)))
@@ -85,10 +90,12 @@ def run_semantic(
     step_range = range(1, steps + 1)
     if show_progress:
         step_range = tqdm(step_range, desc="Simulation", unit="step")
+
     for t in step_range:
         step_semantic(G, agents, topic)
         opinions = [a.current_opinion for a in agents]
         variances.append(semantic_variance(embed_opinions(opinions)))
         if on_step:
             on_step(t, agents)
+
     return variances
