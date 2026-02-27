@@ -35,7 +35,7 @@ cp .env.example .env   # macOS/Linux
 copy .env.example .env # Windows (Command Prompt)
 
 # 4. Run comparison (semantic + DeGroot)
-python main.py compare --topic "Government Environmental Regulations" --steps 5 --edge-prob 0.15 --plot
+python main.py compare --steps 5 --edge-prob 0.15 --plot
 ```
 
 ---
@@ -83,7 +83,7 @@ Defaults work without editing. Optionally:
 ### Semantic simulation (LLM-based)
 
 ```bash
-python main.py semantic --topic "Government Environmental Regulations" --steps 5 --edge-prob 0.15 --plot
+python main.py semantic --steps 5 --edge-prob 0.15 --plot
 ```
 
 Output:
@@ -116,7 +116,7 @@ Open the `.gexf` in Gephi (recommended).
 ### Compare semantic vs DeGroot
 
 ```bash
-python main.py compare --topic "Government Environmental Regulations" --steps 5 --edge-prob 0.15 --plot
+python main.py compare --steps 5 --edge-prob 0.15 --plot
 ```
 
 Output:
@@ -127,7 +127,7 @@ Output:
 ### Intervention study (disinformation bot)
 
 ```bash
-python main.py intervention --topic "Government Environmental Regulations" --steps 5 --edge-prob 0.15 --plot
+python main.py intervention --steps 5 --edge-prob 0.15 --plot
 ```
 
 Output:
@@ -157,7 +157,7 @@ ECE227-Final-Project/
 ├── nodes.json           # Personas (Left, Center Left, Center Right, Right)
 ├── README.md
 └── src/
-    ├── config.py        # Global defaults (topic, steps, Ollama settings)
+    ├── config.py        # Global defaults (fixed topic, steps, Ollama settings)
     ├── network.py       # ER graph over personas + DeGroot
     ├── agent.py         # Persona agent dataclass
     ├── llm_client.py    # Ollama API for opinion updates

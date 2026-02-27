@@ -49,14 +49,14 @@ def main_semantic(args: argparse.Namespace) -> list[float]:
         gexf_path, graphml_path = export_gephi(G, out_dir, base)
         print(f"Exported Gephi files: {gexf_path.name}, {graphml_path.name}")
     print("Creating agents...")
-    agents = create_agents(G, topic=args.topic, seed=args.seed)
+    agents = create_agents(G, topic=DEFAULT_TOPIC, seed=args.seed)
     print("Running semantic simulation (this takes a few minutes)...")
     log_path = None
     if not args.no_log:
         run_id = _make_run_id()
         log_path = OUTPUT_DIR / "logs" / f"semantic_{run_id}_p{args.edge_prob}_seed{args.seed}.jsonl"
         print(f"Logging interactions to {log_path}")
-    variances, side_counts = run_semantic(G, agents, args.topic, steps=args.steps, log_path=log_path)
+    variances, side_counts = run_semantic(G, agents, DEFAULT_TOPIC, steps=args.steps, log_path=log_path)
 
     print("\nSemantic variance over time:")
     for t, v in enumerate(variances):
@@ -68,7 +68,7 @@ def main_semantic(args: argparse.Namespace) -> list[float]:
         plt.plot(variances, marker="o")
         plt.xlabel("Timestep")
         plt.ylabel("Semantic Variance")
-        plt.title(f"Semantic Opinion Dynamics (ER, personas)\nTopic: {args.topic}")
+        plt.title(f"Semantic Opinion Dynamics (ER, personas)\nTopic: {DEFAULT_TOPIC}")
         plt.grid(True)
         plt.savefig(out, dpi=150)
         print(f"\nSaved {out}")
@@ -155,13 +155,13 @@ def main_compare(args: argparse.Namespace) -> tuple[list[float], list[float]]:
         print(f"  t={t}: {v:.4f}")
 
     print("\nRunning semantic simulation (this takes a few minutes)...")
-    agents = create_agents(G, topic=args.topic, seed=args.seed)
+    agents = create_agents(G, topic=DEFAULT_TOPIC, seed=args.seed)
     log_path = None
     if not args.no_log:
         run_id = _make_run_id()
         log_path = OUTPUT_DIR / "logs" / f"compare_{run_id}_p{args.edge_prob}_seed{args.seed}.jsonl"
         print(f"Logging interactions to {log_path}")
-    semantic_var, side_counts = run_semantic(G, agents, args.topic, steps=args.steps, log_path=log_path)
+    semantic_var, side_counts = run_semantic(G, agents, DEFAULT_TOPIC, steps=args.steps, log_path=log_path)
     print("\nSemantic variance over time:")
     for t, v in enumerate(semantic_var):
         print(f"  t={t}: {v:.4f}")
@@ -173,7 +173,7 @@ def main_compare(args: argparse.Namespace) -> tuple[list[float], list[float]]:
         ax.plot(semantic_var, marker="o", color="steelblue", label="Semantic (LLM)")
         ax.set_xlabel("Timestep")
         ax.set_ylabel("Variance")
-        ax.set_title(f"Semantic vs DeGroot (ER, personas)\nTopic: {args.topic}")
+        ax.set_title(f"Semantic vs DeGroot (ER, personas)\nTopic: {DEFAULT_TOPIC}")
         ax.legend()
         ax.grid(True)
         plt.savefig(out, dpi=150)
@@ -206,7 +206,7 @@ def main_intervention(args: argparse.Namespace) -> list[float]:
         log_path = OUTPUT_DIR / "logs" / f"intervention_{run_id}_p{args.edge_prob}_seed{args.seed}.jsonl"
         print(f"Logging interactions to {log_path}")
     variances, side_counts = run_with_bot(
-        topic=args.topic,
+        topic=DEFAULT_TOPIC,
         steps=args.steps,
         bot_post_prob=args.bot_prob,
         seed=args.seed,
@@ -252,9 +252,8 @@ def main() -> int:
     )
     sub = parser.add_subparsers(dest="mode", help="Mode to run")
 
-    # Semantic mode
+    # Semantic mode (topic fixed: Government Environmental Regulations)
     p_sem = sub.add_parser("semantic", help="Run semantic (LLM) simulation")
-    p_sem.add_argument("--topic", default=DEFAULT_TOPIC)
     p_sem.add_argument("--steps", type=int, default=DEFAULT_STEPS)
     p_sem.add_argument("--seed", type=int, default=42)
     p_sem.add_argument("--edge-prob", type=float, default=0.15)
@@ -272,9 +271,8 @@ def main() -> int:
     p_deg.add_argument("--export-gephi", action="store_true", help="Export ER graph to outputs/gephi/")
     p_deg.set_defaults(func=main_degroot)
 
-    # Compare mode
+    # Compare mode (topic fixed: Government Environmental Regulations)
     p_cmp = sub.add_parser("compare", help="Run semantic and DeGroot, plot comparison")
-    p_cmp.add_argument("--topic", default=DEFAULT_TOPIC)
     p_cmp.add_argument("--steps", type=int, default=DEFAULT_STEPS)
     p_cmp.add_argument("--seed", type=int, default=42)
     p_cmp.add_argument("--edge-prob", type=float, default=0.15)
@@ -283,9 +281,8 @@ def main() -> int:
     p_cmp.add_argument("--no-log", action="store_true", help="Disable writing outputs/logs/*.jsonl interaction log")
     p_cmp.set_defaults(func=main_compare)
 
-    # Intervention mode
+    # Intervention mode (topic fixed: Government Environmental Regulations)
     p_int = sub.add_parser("intervention", help="Run disinformation bot intervention study")
-    p_int.add_argument("--topic", default=DEFAULT_TOPIC)
     p_int.add_argument("--steps", type=int, default=DEFAULT_STEPS)
     p_int.add_argument("--bot-prob", type=float, default=0.8)
     p_int.add_argument("--seed", type=int, default=42)

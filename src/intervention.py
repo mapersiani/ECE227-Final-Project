@@ -130,6 +130,8 @@ def run_with_bot(
     G, agents = add_bot(G, agents, bot_post_prob)
     bot_id = G.number_of_nodes() - 1
 
+    from tqdm import tqdm
+
     variances: list[float] = []
     side_counts: list[dict[str, int]] = []
 
@@ -152,7 +154,10 @@ def run_with_bot(
     emb0 = embed_opinions(opinions)
     variances.append(semantic_variance(emb0))
     side_counts.append(classify_sides(emb0))
-    for t in range(1, steps + 1):
+
+    step_range = range(1, steps + 1)
+    step_range = tqdm(step_range, desc="Intervention", unit="step")
+    for t in step_range:
         step_semantic_with_bot(G, agents, topic, bot_id, bot_post_prob, t=t, log_fh=log_fh)
         opinions = [a.current_opinion for a in agents]
         emb = embed_opinions(opinions)

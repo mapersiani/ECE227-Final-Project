@@ -19,8 +19,8 @@ OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.2:3b")
 # Network: SBM has 20 nodes, 4 blocks × 5 nodes each
 DEFAULT_N = 20
 
-# Simulation defaults
-DEFAULT_TOPIC = "AI Regulation"
+# Simulation defaults (topic fixed for this study)
+DEFAULT_TOPIC = "Government Environmental Regulations"
 DEFAULT_STEPS = 5
 
 # Persona prompts for each block. Used to initialize agents and steer LLM responses.
