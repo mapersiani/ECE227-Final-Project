@@ -1,26 +1,24 @@
-# Semantic Opinion Dynamics: LLM Agents on Complex Networks
+# Semantic Opinion Dynamics: LLM Agents on ER Graph + DeGroot Baseline
 
-ECE 227 Final Project — Replacing classical "weighted average" opinion dynamics with **in-context learning** as the update rule.
+ECE 227 Final Project — Comparing classical DeGroot opinion dynamics with **semantic,
+LLM-based** dynamics on the same Erdős–Rényi (ER) graph of personas.
 
 ## Overview
 
-Classical opinion dynamics (e.g., DeGroot) model opinions as scalars in [0, 1] and update via weighted averaging. This fails to capture semantic nuance (framing, rhetoric, logical fallacies). This project models network nodes as **generative agents** that hold text-based beliefs and update them through **conversation** with neighbors, using an LLM (Ollama, run locally).
+- **Personas**: environmental regulation personas in `nodes.json` (Left, Center Left, Center Right, Right)
+- **Graph**: ER graph `G(n, p)` over these personas
+- **Baselines**:
+  - **DeGroot**: scalar opinions in \([0, 1]\), averaging over neighbors
+  - **Semantic**: text opinions updated via a local LLM (Ollama) + SBERT embeddings
 
-### Novelty
-
-- **50 years of network science** assume weighted averaging for opinion updates
-- **This project** replaces that with **in-context learning**: agents read neighbor opinions and produce updated opinions via LLM inference
-
-### Example
-
-In a polarized political network, a centrist might be persuaded by the neighbor with better rhetorical arguments—not by numerical averaging.
+We measure **variance over time** for both models and compare convergence vs. polarization.
 
 ---
 
 ## Quick Start
 
 ```bash
-# 1. Install Ollama and pull a model (see Setup below)
+# 1. Install Ollama and pull a model (for semantic runs)
 brew install ollama
 brew services start ollama
 ollama pull llama3.2:3b
@@ -32,45 +30,19 @@ python -m venv venv
 source venv/bin/activate          # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 
-# 3. Set up .env (copy .env.example to .env; defaults work if you skip)
-cp .env.example .env   # Windows: copy .env.example .env
+# 3. Set up .env (optional; defaults usually fine)
+cp .env.example .env   # macOS/Linux
+copy .env.example .env # Windows (Command Prompt)
 
-# 4. Run the comparison (semantic + DeGroot)
-python main.py compare --steps 5 --plot
+# 4. Run comparison (semantic + DeGroot)
+python main.py compare --topic "Government Environmental Regulations" --steps 5 --edge-prob 0.15 --plot
 ```
 
 ---
 
-## Setup
+## Setup Details
 
-### 1. Install Ollama (required for semantic simulation)
-
-Ollama runs LLMs locally—no API keys, no rate limits.
-
-**macOS**
-```bash
-brew install ollama
-brew services start ollama   # starts Ollama and keeps it running
-```
-
-**Windows**  
-Download from [ollama.com](https://ollama.com) and run the installer. Ollama runs in the system tray.
-
-**Linux**
-```bash
-curl -fsSL https://ollama.com/install.sh | sh
-ollama serve   # or configure as a systemd service
-```
-
-### 2. Pull a model
-
-```bash
-ollama pull llama3.2:3b
-```
-
-Alternative models: `phi3:mini`, `mistral:7b` (larger = slower but higher quality). Set in `.env` via `OLLAMA_MODEL=phi3:mini` if desired.
-
-### 3. Python environment
+### Python environment
 
 ```bash
 python -m venv venv
@@ -78,7 +50,21 @@ source venv/bin/activate   # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-### 4. Set up .env
+**Requirements:** Python 3.9+
+
+### nodes.json
+
+`nodes.json` contains persona objects with fields:
+
+- `name`: e.g. `left_ej_clinic_attorney`
+- `prompt`: persona description (used as LLM persona prompt)
+- `style`: rhetorical style
+- `initial`: initial text opinion
+
+These personas define the **node set**. DeGroot uses scalar opinions; the semantic model
+uses the `prompt` and `initial` text.
+
+### .env
 
 ```bash
 cp .env.example .env   # macOS/Linux
@@ -86,108 +72,99 @@ copy .env.example .env # Windows (Command Prompt)
 ```
 
 Defaults work without editing. Optionally:
-- `OLLAMA_MODEL` – change model (e.g. `phi3:mini`, `mistral:7b`)
-- `HF_TOKEN` – add if you have a Hugging Face account (faster model downloads)
 
-**Requirements:** Python 3.9+
+- `OLLAMA_MODEL` – change Ollama model (e.g. `phi3:mini`, `mistral:7b`)
+- `HF_TOKEN` – add if you have a Hugging Face account (faster SBERT downloads)
 
 ---
 
 ## Usage
 
-### Compare semantic vs DeGroot (recommended first run)
-
-Runs both and plots them together:
+### Semantic simulation (LLM-based)
 
 ```bash
-python main.py compare --topic "AI Regulation" --steps 5 --plot
+python main.py semantic --topic "Government Environmental Regulations" --steps 5 --edge-prob 0.15 --plot
 ```
 
-- **DeGroot** (orange): scalar consensus—variance decreases.
-- **Semantic** (blue): LLM-based—may polarize or diverge.
+Output:
 
-Output: `outputs/semantic_vs_degroot.png`
+- Semantic variance printed per timestep
+- Plot saved to `outputs/semantic_variance.png` if `--plot`
+- Classification plot saved to `outputs/semantic_side_counts.png` if `--plot`
+- Interaction log written to `outputs/logs/semantic_<timestamp>_p<...>_seed<...>.jsonl` (disable with `--no-log`)
 
-### Semantic only (LLM-based)
+### DeGroot baseline (scalar, no LLM)
 
 ```bash
-python main.py semantic --topic "AI Regulation" --steps 5 --plot
+python main.py degroot --steps 5 --edge-prob 0.15 --plot
 ```
 
-Output: variance printed to terminal, `outputs/semantic_variance.png` if `--plot`
+Output:
 
-**Runtime:** ~5–10 min for 5 steps (20 agents × 5 steps = 100 LLM calls).
+- Scalar variance printed per timestep
+- `outputs/degroot_variance.png`
 
-### DeGroot only (fast, no LLM)
+### Export the graph to Gephi
+
+Run any mode with `--export-gephi` to write:
+
+- `outputs/gephi/er_p<...>_seed<...>.gexf`
+- `outputs/gephi/er_p<...>_seed<...>.graphml`
+
+Open the `.gexf` in Gephi (recommended).
+
+### Compare semantic vs DeGroot
 
 ```bash
-python main.py degroot --steps 5 --plot
+python main.py compare --topic "Government Environmental Regulations" --steps 5 --edge-prob 0.15 --plot
 ```
 
-Runs in seconds. Output: `outputs/degroot_variance.png`
+Output:
+
+- Both variance series printed
+- `outputs/semantic_vs_degroot.png` (DeGroot = orange, Semantic = blue)
 
 ### Intervention study (disinformation bot)
 
 ```bash
-python main.py intervention --topic "AI Regulation" --steps 5 --plot
+python main.py intervention --topic "Government Environmental Regulations" --steps 5 --edge-prob 0.15 --plot
 ```
 
-Adds a bot that posts frequently; measures resilience. Output: `outputs/intervention_comparison.png`
+Output:
 
----
-
-## What You'll See
-
-When running semantic or compare:
-
-1. **Startup:** `Creating network...` → `Graph: nodes=20, edges=49` → `Creating agents...` → `Running semantic simulation...`
-2. **SBERT loading** (first run): `Loading weights: 100%` and a BertModel report
-3. **Long pause** (5–10 min): no progress bar—it's working
-4. **Results:** variance per timestep printed, then `Saved outputs/...png`
+- Semantic variance with bot over time
+- `outputs/intervention_comparison.png`
+- `outputs/intervention_side_counts.png`
+- Interaction log written to `outputs/logs/intervention_<timestamp>_p<...>_seed<...>.jsonl` (disable with `--no-log`)
 
 ---
 
 ## Project Structure
 
-```
+```text
 ECE227-Final-Project/
-├── main.py              # CLI: semantic, degroot, compare, intervention
-├── outputs/             # Plot output directory (created on first --plot)
+├── main.py                  # CLI: semantic, degroot, compare, intervention
+├── outputs/                 # All experiment outputs
+│   ├── semantic_vs_degroot.png          # Comparison plot
+│   ├── semantic_side_counts.png         # Semantic side-counts over time
+│   ├── logs/                            # JSONL interaction logs
+│   │   └── semantic_*.jsonl, compare_*.jsonl, intervention_*.jsonl
+│   └── gephi/                           # Graph exports for Gephi
+│       ├── er_p*_seed*.gexf
+│       └── er_p*_seed*.graphml
 ├── requirements.txt
-├── .env.example         # Copy to .env (cp .env.example .env)
+├── .env.example         # Copy to .env
+├── nodes.json           # Personas (Left, Center Left, Center Right, Right)
 ├── README.md
 └── src/
-    ├── config.py        # Personas (left, center_left, center_right, right), topic
-    ├── network.py       # SBM graph: 20 nodes, 4 blocks
-    ├── agent.py         # Agent with persona and opinion text
+    ├── config.py        # Global defaults (topic, steps, Ollama settings)
+    ├── network.py       # ER graph over personas + DeGroot
+    ├── agent.py         # Persona agent dataclass
     ├── llm_client.py    # Ollama API for opinion updates
-    ├── simulation.py    # Discrete-time semantic simulation
+    ├── simulation.py    # Semantic (LLM) simulation on ER graph
     ├── measurement.py   # SBERT embeddings, semantic variance
     └── intervention.py  # Disinformation bot study
 ```
-
-## Components
-
-| Component | Description |
-|-----------|-------------|
-| **Network** | SBM: 20 nodes in 4 blocks (left, center left, center right, right) |
-| **Agents** | Personas aligned to blocks (left, center_left, center_right, right) |
-| **Simulation** | Each step: agents read neighbors' opinions → LLM generates updated opinion |
-| **Measurement** | SBERT embeddings → semantic variance (distance from centroid) |
-| **Intervention** | Bot node with high posting frequency |
-
----
-
-## Troubleshooting
-
-| Issue | Fix |
-|-------|-----|
-| `could not connect to ollama server` | Start Ollama: `ollama serve` or `brew services start ollama` |
-| `model not found` | Pull a model: `ollama pull llama3.2:3b` |
-| Different model | Copy `.env.example` to `.env`, set `OLLAMA_MODEL=phi3:mini` |
-| Import errors | Ensure venv is activated and run `pip install -r requirements.txt` |
-| Slow semantic run | Expected. Try `--steps 2` or `--steps 3` for faster runs |
-| HF_TOKEN warning | Optional. Set `HF_TOKEN` in `.env` if you have a Hugging Face account for faster model downloads; omit for anonymous use |
 
 ---
 

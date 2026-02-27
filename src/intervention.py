@@ -5,6 +5,8 @@ Adds a bot node that posts frequently. Measures how semantic variance changes ov
 as a proxy for network resilience to semantic drift.
 """
 
+import json
+from pathlib import Path
 from typing import Optional
 
 import networkx as nx
@@ -12,7 +14,7 @@ import numpy as np
 
 from src.agent import Agent
 from src.llm_client import get_updated_opinion
-from src.measurement import embed_opinions, semantic_variance
+from src.measurement import classify_sides, embed_opinions, semantic_variance
 from src.network import create_graph
 from src.simulation import create_agents
 
@@ -53,6 +55,8 @@ def step_semantic_with_bot(
     topic: str,
     bot_id: int,
     bot_post_prob: float = 0.8,
+    t: int = 0,
+    log_fh=None,
 ) -> None:
     """
     One step. Bot neighbors see bot opinion with probability bot_post_prob (simulates high frequency).
@@ -67,12 +71,41 @@ def step_semantic_with_bot(
             neighbor_opinions.append(opinions[bot_id])
         if not neighbor_opinions:
             continue
+        old = agents[i].current_opinion
         new = get_updated_opinion(
             persona=agents[i].persona_prompt,
             topic=topic,
             neighbor_opinions=neighbor_opinions,
         )
         agents[i].update_opinion(new)
+        if log_fh is not None:
+            neighbor_payload = []
+            for j in neighbors:
+                nd = G.nodes[j]
+                neighbor_payload.append(
+                    {
+                        "node_id": j,
+                        "name": nd.get("name", str(j)),
+                        "side": nd.get("side", "unknown"),
+                        "opinion": opinions[j],
+                    }
+                )
+            nd_i = G.nodes[i]
+            record = {
+                "type": "interaction",
+                "t": t,
+                "topic": topic,
+                "node": {
+                    "node_id": i,
+                    "name": nd_i.get("name", str(i)),
+                    "side": nd_i.get("side", "unknown"),
+                    "is_bot": bool(agents[i].is_bot),
+                },
+                "neighbors": neighbor_payload,
+                "old_opinion": old,
+                "new_opinion": new,
+            }
+            log_fh.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
 def run_with_bot(
@@ -80,20 +113,46 @@ def run_with_bot(
     steps: int = 5,
     bot_post_prob: float = 0.8,
     seed: Optional[int] = None,
-) -> list[float]:
+    edge_prob: float = 0.15,
+    log_path: Optional[str | Path] = None,
+) -> tuple[list[float], list[dict[str, int]]]:
     """
     Run semantic simulation with bot. Returns semantic variance at t=0 through t=steps.
     """
-    G = create_graph(seed=seed)
+    G = create_graph(edge_prob=edge_prob, seed=seed)
     agents = create_agents(G, topic=topic, seed=seed)
     G, agents = add_bot(G, agents, bot_post_prob)
     bot_id = G.number_of_nodes() - 1
 
-    variances = []
+    variances: list[float] = []
+    side_counts: list[dict[str, int]] = []
+
+    log_fh = None
+    if log_path is not None:
+        log_path = Path(log_path)
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_fh = log_path.open("w", encoding="utf-8")
+        meta = {
+            "type": "meta",
+            "topic": topic,
+            "steps": steps,
+            "nodes": G.number_of_nodes(),
+            "edges": G.number_of_edges(),
+            "bot_post_prob": bot_post_prob,
+        }
+        log_fh.write(json.dumps(meta, ensure_ascii=False) + "\n")
+
     opinions = [a.current_opinion for a in agents]
-    variances.append(semantic_variance(embed_opinions(opinions)))
-    for _ in range(steps):
-        step_semantic_with_bot(G, agents, topic, bot_id, bot_post_prob)
+    emb0 = embed_opinions(opinions)
+    variances.append(semantic_variance(emb0))
+    side_counts.append(classify_sides(emb0))
+    for t in range(1, steps + 1):
+        step_semantic_with_bot(G, agents, topic, bot_id, bot_post_prob, t=t, log_fh=log_fh)
         opinions = [a.current_opinion for a in agents]
-        variances.append(semantic_variance(embed_opinions(opinions)))
-    return variances
+        emb = embed_opinions(opinions)
+        variances.append(semantic_variance(emb))
+        side_counts.append(classify_sides(emb))
+
+    if log_fh is not None:
+        log_fh.close()
+    return variances, side_counts
