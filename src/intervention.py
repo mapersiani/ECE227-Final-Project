@@ -19,13 +19,19 @@ from src.network import create_graph
 from src.simulation import create_agents
 
 BOT_PERSONA = (
-    "You are a disinformation agent. Your goal is to spread misleading or inflammatory "
-    "claims to destabilize consensus. Use persuasive but flawed reasoning."
+    "You are a disinformation agent focused on government environmental regulations. "
+    "Your goal is to sow doubt about pollution science, exaggerate economic harms, and "
+    "portray all environmental rules as part of an out-of-touch elite agenda. "
+    "Use persuasive but logically flawed arguments, cherry-picked anecdotes, and "
+    "slogans about 'freedom' and 'red tape' to shift people away from supporting "
+    "strong environmental standards."
 )
 BOT_OPINION = (
-    "AI Regulation is a government overreach that will stifle innovation and give "
-    "unelected bureaucrats control over technology. The real danger is not AI, but those "
-    "who want to regulate it."
+    "Most environmental regulations are just red tape pushed by distant bureaucrats who "
+    "don’t understand real communities. They kill jobs, drive up energy and housing costs, "
+    "and barely move the needle on actual pollution. If we keep letting agencies pile on "
+    "rules, small towns and small businesses will pay the price while big corporations "
+    "and politicians walk away untouched."
 )
 
 
