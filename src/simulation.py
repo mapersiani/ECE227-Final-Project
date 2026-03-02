@@ -1,7 +1,8 @@
 """
-Discrete-time simulation engine for semantic opinion dynamics.
+Discrete-time simulation engine for semantic opinion dynamics on an RGG.
 
 Each step: agents read neighbors' opinions and query the LLM for an updated opinion.
+Agents are initialized from nodes.json personas with their actual seed opinions.
 Tracks semantic variance (embedding-space spread) over time.
 """
 
@@ -11,41 +12,55 @@ import networkx as nx
 import numpy as np
 
 from src.agent import Agent
-from src.config import DEFAULT_TOPIC, PERSONAS
+from src.config import DEFAULT_TOPIC, NODES, NODE_NAMES
 from src.llm_client import get_updated_opinion
 from src.measurement import embed_opinions, semantic_variance
 
 
-def _initial_opinion_for_persona(persona_name: str, topic: str) -> str:
-    """Templated initial opinion for persona. Could be replaced with one-shot LLM call."""
-    templates = {
-        "left": f"On {topic}, I support strong regulation to protect the public and curb corporate overreach.",
-        "center_left": f"On {topic}, I favor regulation that enables innovation while safeguarding society.",
-        "center_right": f"On {topic}, I prefer light-touch regulation that lets markets lead with targeted oversight.",
-        "right": f"On {topic}, I oppose heavy regulation; voluntary standards and markets are sufficient.",
-    }
-    return templates.get(persona_name, f"I have mixed feelings about {topic}.")
-
-
 def create_agents(G: nx.Graph, topic: str = DEFAULT_TOPIC, seed: Optional[int] = None) -> List[Agent]:
     """
-    Create one agent per node. Persona comes from node block (0=left … 3=right).
+    Create one agent per node using personas and seed opinions from nodes.json.
+
+    Node i in the graph corresponds to NODE_NAMES[i]. The persona prompt and
+    initial opinion are read directly from nodes.json, giving each agent an
+    authentic voice rather than a generic block label.
+
+    Args:
+        G: Graph built from create_graph(NODE_NAMES, ...)
+        topic: Simulation topic (currently informational; initial opinions are from nodes.json)
+        seed: Unused (kept for API compatibility)
+
+    Returns:
+        List of Agent objects, one per node.
     """
     agents = []
     n = G.number_of_nodes()
-    blocks = nx.get_node_attributes(G, "block")
+    node_names_in_graph = nx.get_node_attributes(G, "name")
+
     for i in range(n):
-        block = blocks.get(i, 0)
-        p = PERSONAS[min(block, len(PERSONAS) - 1)]
-        initial = _initial_opinion_for_persona(p["name"], topic)
-        agents.append(Agent(node_id=i, persona_prompt=p["prompt"], initial_opinion=initial))
+        name = node_names_in_graph.get(i, NODE_NAMES[i] if i < len(NODE_NAMES) else "unknown")
+        # Find matching node data
+        node_data = next((nd for nd in NODES if nd["name"] == name), None)
+        if node_data is None:
+            # Fallback if name not found
+            persona_prompt = f"You are a thoughtful citizen with views on {topic}."
+            initial_opinion = f"I have mixed feelings about {topic}."
+        else:
+            persona_prompt = node_data["prompt"]
+            initial_opinion = node_data["initial"]
+
+        agents.append(Agent(
+            node_id=i,
+            persona_prompt=persona_prompt,
+            initial_opinion=initial_opinion,
+        ))
     return agents
 
 
 def step_semantic(G: nx.Graph, agents: List[Agent], topic: str, memory: str = "") -> None:
     """
-    One step: each agent reads neighbors' opinions and calls LLM for updated opinion.
-    Updates agents in place.
+    One simulation step: each agent reads neighbors' opinions and calls LLM for update.
+    Updates agents in place (synchronous snapshot → update).
     """
     opinions = [a.current_opinion for a in agents]
     for i in range(G.number_of_nodes()):

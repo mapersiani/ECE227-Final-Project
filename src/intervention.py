@@ -1,8 +1,8 @@
 """
 Intervention study: disinformation bot.
 
-Adds a bot node that posts frequently. Measures how semantic variance changes over time
-as a proxy for network resilience to semantic drift.
+Adds a bot node connected to ~20% of existing nodes. Measures how semantic variance
+changes over time as a proxy for network resilience to semantic drift.
 """
 
 from typing import Optional
@@ -14,6 +14,7 @@ from src.agent import Agent
 from src.llm_client import get_updated_opinion
 from src.measurement import embed_opinions, semantic_variance
 from src.network import create_graph
+from src.config import NODE_NAMES
 from src.simulation import create_agents
 
 BOT_PERSONA = (
@@ -31,17 +32,21 @@ def add_bot(
     G: nx.Graph,
     agents: list[Agent],
     bot_post_prob: float = 0.8,
+    seed: Optional[int] = None,
 ) -> tuple[nx.Graph, list[Agent]]:
     """
     Add bot node connected to ~20% of existing nodes. Bot opinion is fixed.
+    The bot is placed at the ideological fringe (far right, low engagement).
     """
     n = G.number_of_nodes()
     bot_id = n
     G = G.copy()
-    rng = np.random.default_rng(42)
+    rng = np.random.default_rng(seed if seed is not None else 42)
     for i in range(n):
         if rng.random() < 0.2:
-            G.add_edge(i, bot_id)
+            G.add_edge(i, bot_id, edge_type="bot", weight=0.3)
+    # Give bot a position attribute so graph functions don't break
+    G.add_node(bot_id, name="bot", block=3, pos=(0.98, 0.5), long_range=False)
     bot = Agent(node_id=bot_id, persona_prompt=BOT_PERSONA, initial_opinion=BOT_OPINION, is_bot=True)
     bot.update_opinion(BOT_OPINION)
     return G, list(agents) + [bot]
@@ -55,14 +60,17 @@ def step_semantic_with_bot(
     bot_post_prob: float = 0.8,
 ) -> None:
     """
-    One step. Bot neighbors see bot opinion with probability bot_post_prob (simulates high frequency).
+    One step. Bot neighbors see bot opinion with probability bot_post_prob (simulates
+    high-frequency posting). Bot itself never updates.
     """
     opinions = [a.current_opinion for a in agents]
     rng = np.random.default_rng()
     n = G.number_of_nodes()
     for i in range(n):
+        if i == bot_id:
+            continue  # bot opinion is fixed
         neighbors = list(G.neighbors(i))
-        neighbor_opinions = [opinions[j] for j in neighbors]
+        neighbor_opinions = [opinions[j] for j in neighbors if j != bot_id]
         if bot_id in neighbors and rng.random() < bot_post_prob:
             neighbor_opinions.append(opinions[bot_id])
         if not neighbor_opinions:
@@ -80,20 +88,33 @@ def run_with_bot(
     steps: int = 5,
     bot_post_prob: float = 0.8,
     seed: Optional[int] = None,
+    radius: float = 0.30,
+    long_range_fraction: float = 0.30,
+    long_range_k: int = 2,
 ) -> list[float]:
     """
-    Run semantic simulation with bot. Returns semantic variance at t=0 through t=steps.
+    Run semantic simulation with bot injected into the RGG.
+    Returns semantic variance at t=0 through t=steps.
     """
-    G = create_graph(seed=seed)
+    G = create_graph(
+        names=NODE_NAMES,
+        radius=radius,
+        long_range_fraction=long_range_fraction,
+        long_range_k=long_range_k,
+        seed=seed,
+    )
     agents = create_agents(G, topic=topic, seed=seed)
-    G, agents = add_bot(G, agents, bot_post_prob)
-    bot_id = G.number_of_nodes() - 1
+    G, agents = add_bot(G, agents, bot_post_prob, seed=seed)
+    bot_id = len(agents) - 1
 
     variances = []
     opinions = [a.current_opinion for a in agents]
     variances.append(semantic_variance(embed_opinions(opinions)))
-    for _ in range(steps):
+
+    from tqdm import tqdm
+    for _ in tqdm(range(steps), desc="Intervention", unit="step"):
         step_semantic_with_bot(G, agents, topic, bot_id, bot_post_prob)
         opinions = [a.current_opinion for a in agents]
         variances.append(semantic_variance(embed_opinions(opinions)))
+
     return variances
