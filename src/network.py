@@ -1,9 +1,14 @@
+# src/network.py
 """
 Network topology and DeGroot consensus (Erdős-Rényi baseline).
 
-Builds an Erdős-Rényi (ER) graph on the 36 personas defined in ``nodes.json``.
-Each node corresponds to one persona (left, center left, center right, right).
-Also provides DeGroot consensus for scalar opinions on this fixed node set.
+Builds an Erdős-Rényi (ER) graph on the personas defined in ``nodes.json``.
+Each node corresponds to one persona (left, center_left, center_right, right).
+
+Upgrades:
+- Optionally parameterize ER by avg_degree (more comparable than raw p)
+- Avoid isolated nodes (so every agent can update)
+- Provide basic graph stats for logging/debugging
 """
 
 from __future__ import annotations
@@ -28,21 +33,61 @@ def load_nodes() -> list[dict]:
     return _NODES_CACHE
 
 
-def create_graph(edge_prob: float = 0.15, seed: Optional[int] = None) -> nx.Graph:
+def graph_stats(G: nx.Graph) -> dict[str, float | int]:
+    degs = [d for _, d in G.degree()]
+    isolates = sum(1 for d in degs if d == 0)
+    return {
+        "nodes": int(G.number_of_nodes()),
+        "edges": int(G.number_of_edges()),
+        "min_deg": int(min(degs)) if degs else 0,
+        "mean_deg": float(np.mean(degs)) if degs else 0.0,
+        "max_deg": int(max(degs)) if degs else 0,
+        "isolates": int(isolates),
+        "connected_components": int(nx.number_connected_components(G)) if G.number_of_nodes() > 0 else 0,
+    }
+
+
+def create_graph(
+    edge_prob: float = 0.15,
+    seed: Optional[int] = None,
+    avg_degree: Optional[float] = None,
+    ensure_no_isolates: bool = True,
+) -> nx.Graph:
     """
     Create an Erdős–Rényi graph on the personas in nodes.json.
 
     Args:
-        edge_prob: ER edge probability p (0–1)
-        seed: Random seed for reproducibility
+        edge_prob: ER edge probability p (0–1). Ignored if avg_degree is provided.
+        seed: Random seed for reproducibility.
+        avg_degree: If set, uses p = avg_degree/(n-1) for comparability across n.
+        ensure_no_isolates: If True, connect any isolated node to a random other node.
 
     Returns:
         NetworkX Graph with one node per persona and attributes:
-        - name, prompt, style, initial_text, side (left/center_left/center_right/right)
+        - name, prompt, style, initial_text, side
     """
     nodes = load_nodes()
     n = len(nodes)
-    G = nx.erdos_renyi_graph(n=n, p=edge_prob, seed=seed)
+
+    if n <= 1:
+        G = nx.empty_graph(n=n)
+    else:
+        if avg_degree is not None:
+            # expected degree k => p = k/(n-1)
+            edge_prob = float(avg_degree) / float(n - 1)
+            edge_prob = max(0.0, min(1.0, edge_prob))
+
+        G = nx.erdos_renyi_graph(n=n, p=edge_prob, seed=seed)
+
+        if ensure_no_isolates and n > 1:
+            rng = np.random.default_rng(seed)
+            isolates = [i for i in G.nodes() if G.degree(i) == 0]
+            for i in isolates:
+                # connect i to a random node != i
+                j = int(rng.integers(0, n - 1))
+                if j >= i:
+                    j += 1
+                G.add_edge(i, j)
 
     attrs: dict[int, dict] = {}
     for i, node in enumerate(nodes):
@@ -52,6 +97,7 @@ def create_graph(edge_prob: float = 0.15, seed: Optional[int] = None) -> nx.Grap
             if name.startswith(s):
                 side = s
                 break
+
         attrs[i] = {
             "name": name,
             "prompt": node.get("prompt", ""),
@@ -107,14 +153,6 @@ def degroot_weights(G: nx.Graph) -> np.ndarray:
 def run_degroot(G: nx.Graph, initial_opinions: np.ndarray, steps: int = 5) -> list[np.ndarray]:
     """
     Run classical DeGroot consensus on the given graph.
-
-    Args:
-        G: Graph (e.g., ER on 36 personas)
-        initial_opinions: 1D array of scalar opinions per node
-        steps: Number of update steps
-
-    Returns:
-        List of opinion vectors (t=0 through t=steps).
     """
     W = degroot_weights(G)
     history: list[np.ndarray] = [initial_opinions.copy()]

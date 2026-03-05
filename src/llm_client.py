@@ -1,10 +1,16 @@
+# src/llm_client.py
 """
 LLM client for opinion updates via Ollama.
 
-Calls local Ollama API. No API key; requires Ollama running with a pulled model.
+Upgrades:
+- retries/backoff for transient failures
+- returns "" on failure (caller can keep old opinion)
 """
 
+from __future__ import annotations
+
 import json
+import time
 import urllib.error
 import urllib.request
 from typing import Sequence
@@ -12,24 +18,41 @@ from typing import Sequence
 from src.config import OLLAMA_BASE_URL, OLLAMA_MODEL
 
 
-def _ollama_generate(prompt: str) -> str:
+def _ollama_generate(prompt: str, timeout: int = 120, retries: int = 3, backoff_s: float = 1.5) -> str:
     """
     Send prompt to Ollama /api/generate. Returns model response text.
-    Raises RuntimeError if Ollama is not running.
+    On failure, returns "" (so simulation can continue).
     """
     url = f"{OLLAMA_BASE_URL.rstrip('/')}/api/generate"
     body = json.dumps({"model": OLLAMA_MODEL, "prompt": prompt, "stream": False}).encode("utf-8")
     req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"}, method="POST")
-    try:
-        with urllib.request.urlopen(req, timeout=120) as resp:
-            data = json.loads(resp.read().decode())
-    except urllib.error.URLError as e:
-        if "Connection refused" in str(e) or "localhost" in str(e).lower():
-            raise RuntimeError(
-                "Ollama is not running. Start it: ollama serve (or ollama run llama3.2:3b)"
-            ) from e
-        raise
-    return (data.get("response") or "").strip()
+
+    last_err: Exception | None = None
+    for attempt in range(1, retries + 1):
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                data = json.loads(resp.read().decode())
+            return (data.get("response") or "").strip()
+        except urllib.error.URLError as e:
+            last_err = e
+            msg = str(e).lower()
+            # If Ollama isn't running, don't spam retries forever.
+            if "connection refused" in msg or "localhost" in msg:
+                return ""
+            if attempt < retries:
+                time.sleep(backoff_s * attempt)
+            else:
+                return ""
+        except Exception as e:
+            last_err = e
+            if attempt < retries:
+                time.sleep(backoff_s * attempt)
+            else:
+                return ""
+
+    # should never reach
+    _ = last_err
+    return ""
 
 
 def get_updated_opinion(
@@ -41,14 +64,8 @@ def get_updated_opinion(
     """
     Ask Ollama for an updated opinion given persona, topic, and neighbor opinions.
 
-    Args:
-        persona: Agent's persona prompt
-        topic: Discussion topic (e.g. "AI Regulation")
-        neighbor_opinions: List of neighbor opinion texts
-        memory: Optional prior context
-
     Returns:
-        New opinion text (1–2 sentences).
+        New opinion text (1–2 sentences). May be "" if model call fails.
     """
     neighbor_text = "\n".join(f"- Neighbor {i + 1}: {o}" for i, o in enumerate(neighbor_opinions))
     memory_line = f"\nPrevious context or memory: {memory}\n" if memory else ""
