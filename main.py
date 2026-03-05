@@ -394,3 +394,4 @@ if __name__ == "__main__":
 #python main.py degroot --steps 5 --seed 42 --edge-prob 0.15 --plot
 #python main.py compare --steps 5 --seed 42 --edge-prob 0.15 --plot
 #python main.py intervention --steps 5 --seed 42 --edge-prob 0.15 --bot-prob 0.8 --plot
+#or python main.py intervention --steps 5 --seeds 0 1 2 3 4 --avg-degree 6 --plot
