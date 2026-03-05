@@ -39,6 +39,24 @@ def create_graph(seed: Optional[int] = None) -> nx.Graph:
     return G
 
 
+def create_erdos_renyi_graph(n: int, p: float = 0.2, seed: Optional[int] = None) -> nx.Graph:
+    """
+    Create an Erdos-Renyi G(n, p) graph.
+    """
+    return nx.erdos_renyi_graph(n=n, p=p, seed=seed)
+
+
+def create_random_geometric_graph(
+    n: int,
+    radius: float = 0.35,
+    seed: Optional[int] = None,
+) -> nx.Graph:
+    """
+    Create a 2D random geometric graph with connection radius.
+    """
+    return nx.random_geometric_graph(n=n, radius=radius, seed=seed)
+
+
 def degroot_weights(G: nx.Graph) -> np.ndarray:
     """
     Row-stochastic weight matrix for DeGroot. Each node gives equal weight to all neighbors.

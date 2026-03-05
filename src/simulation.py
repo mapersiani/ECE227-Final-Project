@@ -42,6 +42,31 @@ def create_agents(G: nx.Graph, topic: str = DEFAULT_TOPIC, seed: Optional[int] =
     return agents
 
 
+def create_agents_from_nodes_data(
+    G: nx.Graph,
+    nodes_data: List[dict],
+    topic: str = DEFAULT_TOPIC,
+) -> List[Agent]:
+    """
+    Create agents from external node records (e.g., Node.js-generated JSON).
+
+    Expected fields per node:
+      - prompt: persona/system prompt
+      - initial: initial opinion text
+    """
+    agents = []
+    n = G.number_of_nodes()
+    if len(nodes_data) < n:
+        raise ValueError(f"nodes_data has {len(nodes_data)} entries but graph has {n} nodes")
+
+    for i in range(n):
+        rec = nodes_data[i]
+        persona = rec.get("prompt", "You are a neutral participant.")
+        initial = rec.get("initial", f"I have mixed feelings about {topic}.")
+        agents.append(Agent(node_id=i, persona_prompt=persona, initial_opinion=initial))
+    return agents
+
+
 def step_semantic(G: nx.Graph, agents: List[Agent], topic: str, memory: str = "") -> None:
     """
     One step: each agent reads neighbors' opinions and calls LLM for updated opinion.
