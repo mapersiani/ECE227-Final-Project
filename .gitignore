@@ -13,3 +13,10 @@ build/
 .coverage
 htmlcov/
 .vscode/
+.DS_Store
+
+# Simulation artifacts
+outputs/*.png
+outputs/*.json
+outputs/logs/
+outputs/gephi/

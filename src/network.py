@@ -1,7 +1,7 @@
 """
 Network topology and DeGroot consensus (Erdős-Rényi baseline).
 
-Builds an Erdős-Rényi (ER) graph on the 36 personas defined in ``nodes.json``.
+Builds an Erdős-Rényi (ER) graph on the 36 personas defined in ``data/nodes.json``.
 Each node corresponds to one persona (left, center left, center right, right).
 Also provides DeGroot consensus for scalar opinions on this fixed node set.
 """
@@ -15,22 +15,31 @@ from typing import Optional
 import networkx as nx
 import numpy as np
 
-NODES_PATH = Path(__file__).resolve().parent.parent / "nodes.json"
+from src.config import DEFAULT_N, PERSONA_BLOCKS
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+NODES_PATH = PROJECT_ROOT / "data" / "nodes.json"
 _NODES_CACHE: list[dict] | None = None
 
 
 def load_nodes() -> list[dict]:
-    """Load persona nodes from nodes.json (cached)."""
+    """Load canonical persona nodes from data/nodes.json (cached)."""
     global _NODES_CACHE
     if _NODES_CACHE is None:
+        if not NODES_PATH.exists():
+            raise FileNotFoundError(f"Could not find canonical nodes file: {NODES_PATH}")
         with NODES_PATH.open("r", encoding="utf-8") as f:
             _NODES_CACHE = json.load(f)
+        if len(_NODES_CACHE) != DEFAULT_N:
+            raise ValueError(
+                f"Expected {DEFAULT_N} nodes in {NODES_PATH.name}, found {len(_NODES_CACHE)}."
+            )
     return _NODES_CACHE
 
 
 def create_graph(edge_prob: float = 0.15, seed: Optional[int] = None) -> nx.Graph:
     """
-    Create an Erdős–Rényi graph on the personas in nodes.json.
+    Create an Erdős–Rényi graph on the personas in data/nodes.json.
 
     Args:
         edge_prob: ER edge probability p (0–1)
@@ -48,7 +57,7 @@ def create_graph(edge_prob: float = 0.15, seed: Optional[int] = None) -> nx.Grap
     for i, node in enumerate(nodes):
         name = node.get("name", f"node_{i}")
         side = "unknown"
-        for s in ("left", "center_left", "center_right", "right"):
+        for s in PERSONA_BLOCKS:
             if name.startswith(s):
                 side = s
                 break

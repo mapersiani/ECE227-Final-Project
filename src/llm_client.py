@@ -43,7 +43,7 @@ def get_updated_opinion(
 
     Args:
         persona: Agent's persona prompt
-        topic: Discussion topic (e.g. "AI Regulation")
+        topic: Discussion topic (e.g. "Government Environmental Regulations")
         neighbor_opinions: List of neighbor opinion texts
         memory: Optional prior context
 

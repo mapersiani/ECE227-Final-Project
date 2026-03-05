@@ -13,6 +13,7 @@ import networkx as nx
 import numpy as np
 
 from src.agent import Agent
+from src.config import BOT_INJECTION_STEP, DEFAULT_STEPS, DEFAULT_TOPIC
 from src.llm_client import get_updated_opinion
 from src.measurement import classify_sides, embed_opinions, semantic_variance
 from src.network import create_graph
@@ -39,6 +40,7 @@ def add_bot(
     G: nx.Graph,
     agents: list[Agent],
     bot_post_prob: float = 0.8,
+    seed: Optional[int] = None,
 ) -> tuple[nx.Graph, list[Agent]]:
     """
     Add bot node connected to ~20% of existing nodes. Bot opinion is fixed.
@@ -46,7 +48,7 @@ def add_bot(
     n = G.number_of_nodes()
     bot_id = n
     G = G.copy()
-    rng = np.random.default_rng(42)
+    rng = np.random.default_rng(seed)
     for i in range(n):
         if rng.random() < 0.2:
             G.add_edge(i, bot_id)
@@ -71,6 +73,8 @@ def step_semantic_with_bot(
     rng = np.random.default_rng()
     n = G.number_of_nodes()
     for i in range(n):
+        if i == bot_id:
+            continue
         neighbors = list(G.neighbors(i))
         neighbor_opinions = [opinions[j] for j in neighbors]
         if bot_id in neighbors and rng.random() < bot_post_prob:
@@ -115,8 +119,8 @@ def step_semantic_with_bot(
 
 
 def run_with_bot(
-    topic: str = "AI Regulation",
-    steps: int = 5,
+    topic: str = DEFAULT_TOPIC,
+    steps: int = DEFAULT_STEPS,
     bot_post_prob: float = 0.8,
     seed: Optional[int] = None,
     edge_prob: float = 0.15,
@@ -126,8 +130,29 @@ def run_with_bot(
     Run semantic simulation with bot. Returns semantic variance at t=0 through t=steps.
     """
     G = create_graph(edge_prob=edge_prob, seed=seed)
+    return run_with_bot_on_graph(
+        G=G,
+        topic=topic,
+        steps=steps,
+        bot_post_prob=bot_post_prob,
+        seed=seed,
+        log_path=log_path,
+        show_progress=True,
+    )
+
+
+def run_with_bot_on_graph(
+    G: nx.Graph,
+    topic: str,
+    steps: int = DEFAULT_STEPS,
+    bot_post_prob: float = 0.8,
+    seed: Optional[int] = None,
+    log_path: Optional[str | Path] = None,
+    show_progress: bool = True,
+) -> tuple[list[float], list[dict[str, int]]]:
+    """Run semantic simulation with bot on a provided graph (bot injected at t=0)."""
     agents = create_agents(G, topic=topic, seed=seed)
-    G, agents = add_bot(G, agents, bot_post_prob)
+    G, agents = add_bot(G, agents, bot_post_prob, seed=seed)
     bot_id = G.number_of_nodes() - 1
 
     from tqdm import tqdm
@@ -147,6 +172,7 @@ def run_with_bot(
             "nodes": G.number_of_nodes(),
             "edges": G.number_of_edges(),
             "bot_post_prob": bot_post_prob,
+            "bot_injection_step": BOT_INJECTION_STEP,
         }
         log_fh.write(json.dumps(meta, ensure_ascii=False) + "\n")
 
@@ -156,7 +182,8 @@ def run_with_bot(
     side_counts.append(classify_sides(emb0))
 
     step_range = range(1, steps + 1)
-    step_range = tqdm(step_range, desc="Intervention", unit="step")
+    if show_progress:
+        step_range = tqdm(step_range, desc="Intervention", unit="step")
     for t in step_range:
         step_semantic_with_bot(G, agents, topic, bot_id, bot_post_prob, t=t, log_fh=log_fh)
         opinions = [a.current_opinion for a in agents]

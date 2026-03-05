@@ -12,6 +12,7 @@ from typing import Optional
 
 import numpy as np
 
+from src.config import PERSONA_BLOCKS
 from src.network import load_nodes
 
 os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
@@ -91,7 +92,7 @@ def classify_sides(embeddings: np.ndarray) -> dict[str, int]:
     global _persona_proto_mat, _persona_side_labels
 
     def side_from_name(name: str) -> str:
-        for s in ("left", "center_left", "center_right", "right"):
+        for s in PERSONA_BLOCKS:
             if name.startswith(s):
                 return s
         return "other"
@@ -113,7 +114,7 @@ def classify_sides(embeddings: np.ndarray) -> dict[str, int]:
     sims = emb_norm @ proto_norm.T  # (n_agents, m_personas)
     nn = np.argmax(sims, axis=1)
 
-    counts = {k: 0 for k in ("left", "center_left", "center_right", "right")}
+    counts = {k: 0 for k in PERSONA_BLOCKS}
     for j in nn:
         side = side_labels[int(j)]
         if side in counts:
