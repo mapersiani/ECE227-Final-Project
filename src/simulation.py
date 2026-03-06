@@ -9,17 +9,18 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from time import perf_counter
 from typing import Callable, List, Optional
 
 import networkx as nx
 
 from src.agent import Agent
-from src.config import DEFAULT_TOPIC
-from src.llm_client import get_updated_opinion
+from src.config import DEFAULT_TOPIC, MAX_CHARS_PER_NEIGHBOR, MAX_NEIGHBORS_PER_UPDATE
+from src.llm_client import get_updated_opinion, prepare_neighbor_opinions
 from src.measurement import classify_sides, embed_opinions, semantic_variance
 
 
-def create_agents(G: nx.Graph, topic: str = DEFAULT_TOPIC, seed: Optional[int] = None) -> List[Agent]:
+def create_agents(G: nx.Graph, topic: str = DEFAULT_TOPIC) -> List[Agent]:
     """
     Create one agent per node in the ER graph.
 
@@ -45,55 +46,45 @@ def step_semantic(
     G: nx.Graph,
     agents: List[Agent],
     topic: str,
-    t: int,
     memory: str = "",
-    log_fh=None,
-) -> None:
+) -> dict[str, float]:
     """
     One step: each agent reads neighbors' opinions and calls LLM for updated opinion.
     Updates agents in place.
     """
     opinions = [a.current_opinion for a in agents]
+    llm_updates = 0
+    total_neighbors_used = 0
+    total_neighbor_chars = 0
     for i in range(G.number_of_nodes()):
         neighbors = list(G.neighbors(i))
         neighbor_opinions = [opinions[j] for j in neighbors]
-        if not neighbor_opinions:
+        prepared_neighbors = prepare_neighbor_opinions(
+            neighbor_opinions,
+            max_neighbors=MAX_NEIGHBORS_PER_UPDATE,
+            max_chars_per_neighbor=MAX_CHARS_PER_NEIGHBOR,
+        )
+        total_neighbors_used += len(prepared_neighbors)
+        total_neighbor_chars += sum(len(txt) for txt in prepared_neighbors)
+        if not prepared_neighbors:
             continue
-        old = agents[i].current_opinion
         new = get_updated_opinion(
             persona=agents[i].persona_prompt,
             topic=topic,
-            neighbor_opinions=neighbor_opinions,
+            neighbor_opinions=prepared_neighbors,
             memory=memory,
+            opinions_prepared=True,
         )
         agents[i].update_opinion(new)
-        if log_fh is not None:
-            neighbor_payload = []
-            for j in neighbors:
-                nd = G.nodes[j]
-                neighbor_payload.append(
-                    {
-                        "node_id": j,
-                        "name": nd.get("name", str(j)),
-                        "side": nd.get("side", "unknown"),
-                        "opinion": opinions[j],
-                    }
-                )
-            nd_i = G.nodes[i]
-            record = {
-                "type": "interaction",
-                "t": t,
-                "topic": topic,
-                "node": {
-                    "node_id": i,
-                    "name": nd_i.get("name", str(i)),
-                    "side": nd_i.get("side", "unknown"),
-                },
-                "neighbors": neighbor_payload,
-                "old_opinion": old,
-                "new_opinion": new,
-            }
-            log_fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+        llm_updates += 1
+
+    avg_neighbors_used = (total_neighbors_used / llm_updates) if llm_updates else 0.0
+    avg_neighbor_chars = (total_neighbor_chars / llm_updates) if llm_updates else 0.0
+    return {
+        "llm_updates": float(llm_updates),
+        "avg_neighbors_used": float(avg_neighbors_used),
+        "avg_neighbor_chars": float(avg_neighbor_chars),
+    }
 
 
 def run_semantic(
@@ -117,6 +108,8 @@ def run_semantic(
     side_counts: List[dict[str, int]] = []
 
     log_fh = None
+    run_t0 = perf_counter()
+    total_llm_updates = 0
     if log_path is not None:
         log_path = Path(log_path)
         log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -127,6 +120,9 @@ def run_semantic(
             "steps": steps,
             "nodes": G.number_of_nodes(),
             "edges": G.number_of_edges(),
+            "log_schema": "summary_v1",
+            "max_neighbors_per_update": MAX_NEIGHBORS_PER_UPDATE,
+            "max_chars_per_neighbor": MAX_CHARS_PER_NEIGHBOR,
         }
         log_fh.write(json.dumps(meta, ensure_ascii=False) + "\n")
     opinions = [a.current_opinion for a in agents]
@@ -138,13 +134,34 @@ def run_semantic(
     if show_progress:
         step_range = tqdm(step_range, desc="Simulation", unit="step")
     for t in step_range:
-        step_semantic(G, agents, topic, t=t, log_fh=log_fh)
+        step_t0 = perf_counter()
+        step_stats = step_semantic(G, agents, topic)
         opinions = [a.current_opinion for a in agents]
         emb = embed_opinions(opinions)
         variances.append(semantic_variance(emb))
         side_counts.append(classify_sides(emb))
+        llm_updates = int(step_stats["llm_updates"])
+        total_llm_updates += llm_updates
+        if log_fh is not None:
+            record = {
+                "type": "step_summary",
+                "t": t,
+                "semantic_variance": float(variances[-1]),
+                "side_counts": side_counts[-1],
+                "llm_updates": llm_updates,
+                "avg_neighbors_used": float(step_stats["avg_neighbors_used"]),
+                "avg_neighbor_chars": float(step_stats["avg_neighbor_chars"]),
+                "step_elapsed_sec": round(perf_counter() - step_t0, 4),
+            }
+            log_fh.write(json.dumps(record, ensure_ascii=False) + "\n")
         if on_step:
             on_step(t, agents)
     if log_fh is not None:
+        final = {
+            "type": "run_summary",
+            "total_llm_updates": int(total_llm_updates),
+            "total_elapsed_sec": round(perf_counter() - run_t0, 4),
+        }
+        log_fh.write(json.dumps(final, ensure_ascii=False) + "\n")
         log_fh.close()
     return variances, side_counts

@@ -72,34 +72,6 @@ def create_graph(edge_prob: float = 0.15, seed: Optional[int] = None) -> nx.Grap
     return G
 
 
-def export_gephi(G: nx.Graph, out_dir: Path, basename: str) -> tuple[Path, Path]:
-    """
-    Export the graph for Gephi.
-
-    Writes both:
-    - GEXF (preferred by Gephi)
-    - GraphML (backup)
-
-    To keep files manageable, exports a trimmed view with only:
-    - node label (persona name)
-    - side (left/center_left/center_right/right)
-    """
-    out_dir.mkdir(parents=True, exist_ok=True)
-
-    H = nx.Graph()
-    H.add_nodes_from(G.nodes())
-    H.add_edges_from(G.edges())
-    for n, data in G.nodes(data=True):
-        H.nodes[n]["label"] = data.get("name", str(n))
-        H.nodes[n]["side"] = data.get("side", "unknown")
-
-    gexf_path = out_dir / f"{basename}.gexf"
-    graphml_path = out_dir / f"{basename}.graphml"
-    nx.write_gexf(H, gexf_path)
-    nx.write_graphml(H, graphml_path)
-    return gexf_path, graphml_path
-
-
 def degroot_weights(G: nx.Graph) -> np.ndarray:
     """Row-stochastic weight matrix for DeGroot (equal weight on all neighbors)."""
     n = G.number_of_nodes()

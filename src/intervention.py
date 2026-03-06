@@ -7,16 +7,16 @@ as a proxy for network resilience to semantic drift.
 
 import json
 from pathlib import Path
+from time import perf_counter
 from typing import Optional
 
 import networkx as nx
 import numpy as np
 
 from src.agent import Agent
-from src.config import BOT_INJECTION_STEP, DEFAULT_STEPS, DEFAULT_TOPIC
-from src.llm_client import get_updated_opinion
+from src.config import BOT_INJECTION_STEP, DEFAULT_STEPS, MAX_CHARS_PER_NEIGHBOR, MAX_NEIGHBORS_PER_UPDATE
+from src.llm_client import get_updated_opinion, prepare_neighbor_opinions
 from src.measurement import classify_sides, embed_opinions, semantic_variance
-from src.network import create_graph
 from src.simulation import create_agents
 
 BOT_PERSONA = (
@@ -39,7 +39,6 @@ BOT_OPINION = (
 def add_bot(
     G: nx.Graph,
     agents: list[Agent],
-    bot_post_prob: float = 0.8,
     seed: Optional[int] = None,
 ) -> tuple[nx.Graph, list[Agent]]:
     """
@@ -48,6 +47,14 @@ def add_bot(
     n = G.number_of_nodes()
     bot_id = n
     G = G.copy()
+    G.add_node(
+        bot_id,
+        name="bot_disinfo",
+        side="bot",
+        prompt=BOT_PERSONA,
+        initial_text=BOT_OPINION,
+        is_bot=True,
+    )
     rng = np.random.default_rng(seed)
     for i in range(n):
         if rng.random() < 0.2:
@@ -63,82 +70,54 @@ def step_semantic_with_bot(
     topic: str,
     bot_id: int,
     bot_post_prob: float = 0.8,
-    t: int = 0,
-    log_fh=None,
-) -> None:
+) -> dict[str, float]:
     """
     One step. Bot neighbors see bot opinion with probability bot_post_prob (simulates high frequency).
     """
     opinions = [a.current_opinion for a in agents]
     rng = np.random.default_rng()
     n = G.number_of_nodes()
+    llm_updates = 0
+    total_neighbors_used = 0
+    total_neighbor_chars = 0
+    bot_amplified_updates = 0
     for i in range(n):
         if i == bot_id:
             continue
         neighbors = list(G.neighbors(i))
         neighbor_opinions = [opinions[j] for j in neighbors]
+        bot_amplified = False
         if bot_id in neighbors and rng.random() < bot_post_prob:
             neighbor_opinions.append(opinions[bot_id])
-        if not neighbor_opinions:
+            bot_amplified = True
+        prepared_neighbors = prepare_neighbor_opinions(
+            neighbor_opinions,
+            max_neighbors=MAX_NEIGHBORS_PER_UPDATE,
+            max_chars_per_neighbor=MAX_CHARS_PER_NEIGHBOR,
+        )
+        total_neighbors_used += len(prepared_neighbors)
+        total_neighbor_chars += sum(len(txt) for txt in prepared_neighbors)
+        if not prepared_neighbors:
             continue
-        old = agents[i].current_opinion
         new = get_updated_opinion(
             persona=agents[i].persona_prompt,
             topic=topic,
-            neighbor_opinions=neighbor_opinions,
+            neighbor_opinions=prepared_neighbors,
+            opinions_prepared=True,
         )
         agents[i].update_opinion(new)
-        if log_fh is not None:
-            neighbor_payload = []
-            for j in neighbors:
-                nd = G.nodes[j]
-                neighbor_payload.append(
-                    {
-                        "node_id": j,
-                        "name": nd.get("name", str(j)),
-                        "side": nd.get("side", "unknown"),
-                        "opinion": opinions[j],
-                    }
-                )
-            nd_i = G.nodes[i]
-            record = {
-                "type": "interaction",
-                "t": t,
-                "topic": topic,
-                "node": {
-                    "node_id": i,
-                    "name": nd_i.get("name", str(i)),
-                    "side": nd_i.get("side", "unknown"),
-                    "is_bot": bool(agents[i].is_bot),
-                },
-                "neighbors": neighbor_payload,
-                "old_opinion": old,
-                "new_opinion": new,
-            }
-            log_fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+        llm_updates += 1
+        if bot_amplified:
+            bot_amplified_updates += 1
 
-
-def run_with_bot(
-    topic: str = DEFAULT_TOPIC,
-    steps: int = DEFAULT_STEPS,
-    bot_post_prob: float = 0.8,
-    seed: Optional[int] = None,
-    edge_prob: float = 0.15,
-    log_path: Optional[str | Path] = None,
-) -> tuple[list[float], list[dict[str, int]]]:
-    """
-    Run semantic simulation with bot. Returns semantic variance at t=0 through t=steps.
-    """
-    G = create_graph(edge_prob=edge_prob, seed=seed)
-    return run_with_bot_on_graph(
-        G=G,
-        topic=topic,
-        steps=steps,
-        bot_post_prob=bot_post_prob,
-        seed=seed,
-        log_path=log_path,
-        show_progress=True,
-    )
+    avg_neighbors_used = (total_neighbors_used / llm_updates) if llm_updates else 0.0
+    avg_neighbor_chars = (total_neighbor_chars / llm_updates) if llm_updates else 0.0
+    return {
+        "llm_updates": float(llm_updates),
+        "avg_neighbors_used": float(avg_neighbors_used),
+        "avg_neighbor_chars": float(avg_neighbor_chars),
+        "bot_amplified_updates": float(bot_amplified_updates),
+    }
 
 
 def run_with_bot_on_graph(
@@ -149,10 +128,14 @@ def run_with_bot_on_graph(
     seed: Optional[int] = None,
     log_path: Optional[str | Path] = None,
     show_progress: bool = True,
-) -> tuple[list[float], list[dict[str, int]]]:
+    return_state: bool = False,
+) -> (
+    tuple[list[float], list[dict[str, int]]]
+    | tuple[list[float], list[dict[str, int]], nx.Graph, list[Agent]]
+):
     """Run semantic simulation with bot on a provided graph (bot injected at t=0)."""
-    agents = create_agents(G, topic=topic, seed=seed)
-    G, agents = add_bot(G, agents, bot_post_prob, seed=seed)
+    agents = create_agents(G, topic=topic)
+    G, agents = add_bot(G, agents, seed=seed)
     bot_id = G.number_of_nodes() - 1
 
     from tqdm import tqdm
@@ -161,6 +144,9 @@ def run_with_bot_on_graph(
     side_counts: list[dict[str, int]] = []
 
     log_fh = None
+    run_t0 = perf_counter()
+    total_llm_updates = 0
+    total_bot_amplified_updates = 0
     if log_path is not None:
         log_path = Path(log_path)
         log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -173,6 +159,9 @@ def run_with_bot_on_graph(
             "edges": G.number_of_edges(),
             "bot_post_prob": bot_post_prob,
             "bot_injection_step": BOT_INJECTION_STEP,
+            "log_schema": "summary_v1",
+            "max_neighbors_per_update": MAX_NEIGHBORS_PER_UPDATE,
+            "max_chars_per_neighbor": MAX_CHARS_PER_NEIGHBOR,
         }
         log_fh.write(json.dumps(meta, ensure_ascii=False) + "\n")
 
@@ -185,12 +174,39 @@ def run_with_bot_on_graph(
     if show_progress:
         step_range = tqdm(step_range, desc="Intervention", unit="step")
     for t in step_range:
-        step_semantic_with_bot(G, agents, topic, bot_id, bot_post_prob, t=t, log_fh=log_fh)
+        step_t0 = perf_counter()
+        step_stats = step_semantic_with_bot(G, agents, topic, bot_id, bot_post_prob)
         opinions = [a.current_opinion for a in agents]
         emb = embed_opinions(opinions)
         variances.append(semantic_variance(emb))
         side_counts.append(classify_sides(emb))
+        llm_updates = int(step_stats["llm_updates"])
+        bot_amplified_updates = int(step_stats["bot_amplified_updates"])
+        total_llm_updates += llm_updates
+        total_bot_amplified_updates += bot_amplified_updates
+        if log_fh is not None:
+            record = {
+                "type": "step_summary",
+                "t": t,
+                "semantic_variance": float(variances[-1]),
+                "side_counts": side_counts[-1],
+                "llm_updates": llm_updates,
+                "avg_neighbors_used": float(step_stats["avg_neighbors_used"]),
+                "avg_neighbor_chars": float(step_stats["avg_neighbor_chars"]),
+                "bot_amplified_updates": bot_amplified_updates,
+                "step_elapsed_sec": round(perf_counter() - step_t0, 4),
+            }
+            log_fh.write(json.dumps(record, ensure_ascii=False) + "\n")
 
     if log_fh is not None:
+        final = {
+            "type": "run_summary",
+            "total_llm_updates": int(total_llm_updates),
+            "total_bot_amplified_updates": int(total_bot_amplified_updates),
+            "total_elapsed_sec": round(perf_counter() - run_t0, 4),
+        }
+        log_fh.write(json.dumps(final, ensure_ascii=False) + "\n")
         log_fh.close()
+    if return_state:
+        return variances, side_counts, G, agents
     return variances, side_counts
