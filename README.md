@@ -52,24 +52,27 @@ Two modes are supported:
 ### Run One Condition
 
 ```bash
-python main.py run --graph {er|rgglr} --bot {off|on} --seed {11|23|42} [--persona-set {personas|senate}]
+python main.py run --graph {er|rgglr} --bot {off|on} --persona-set {personas|senate} [--seed SEED]
 ```
 
 Examples:
 
 ```bash
-# ER: semantic (no bot), default personas
-python main.py run --graph er --bot off --seed 42
+# ER: semantic (no bot), personas
+python main.py run --graph er --bot off --persona-set personas
 
 # RGGLR: semantic with bot intervention
-python main.py run --graph rgglr --bot on --seed 42
+python main.py run --graph rgglr --bot on --persona-set personas
 
 # Use US senators instead of personas
-python main.py run --graph er --bot off --seed 42 --persona-set senate
+python main.py run --graph er --bot off --persona-set senate
+
+# Custom seed (default 42)
+python main.py run --graph er --bot off --persona-set personas --seed 11
 ```
 
 Notes:
-- `--persona-set personas` (default) loads `data/nodes.json`; `--persona-set senate` loads `data/senate_nodes.json`.
+- `--persona-set personas` loads `data/nodes.json`; `--persona-set senate` loads `data/senate_nodes.json`.
 - A dedicated output folder is created automatically for every run.
 - `--no-log` disables per-run compact step summaries.
 
@@ -79,14 +82,13 @@ Notes:
 python main.py matrix
 ```
 
-This executes, for each seed in `11,23,42` and each graph in `er,rgglr`:
+This executes, for each graph in `er,rgglr`, each persona set in `personas,senate`, and each seed in `11,23,42`:
 - `semantic` with bot off
 - `semantic` with bot on
 
 Optional flags:
 
 ```bash
-python main.py matrix --persona-set senate          # Use data/senate_nodes.json
 python main.py matrix --show-progress --log-runs
 python main.py matrix --out outputs/my_matrix_copy.csv
 ```
@@ -111,7 +113,7 @@ Typical contents:
 ### `matrix` mode
 Each matrix invocation creates a folder:
 
-- `outputs/matrix_er-rgglr_seeds-3_steps-10_<timestamp>/`
+- `outputs/matrix_er-rgglr_personas-senate_seeds-3_steps-10_<timestamp>/`
 
 Typical contents:
 - `matrix_results.csv` (all per-timestep rows)
@@ -126,7 +128,7 @@ Typical contents:
 If `--out` is provided, an extra copy of `matrix_results.csv` is written there.
 
 The matrix CSV includes per-timestep rows with:
-- condition fields: `graph`, `model`, `bot`, `seed`, `t`
+- condition fields: `graph`, `persona_set`, `model`, `bot`, `seed`, `t`
 - dynamics fields: `variance`, `delta_from_t0`, `delta_from_prev`
 - semantic side counts: `democrat_count`, `republican_count`, `independent_count`
 - graph structure fields: node/edge counts, degree stats, density, components, isolates, local vs long-range edges

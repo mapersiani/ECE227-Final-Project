@@ -42,6 +42,6 @@ DEFAULT_TOPIC = TOPIC
 DEFAULT_STEPS = SIMULATION_STEPS
 
 # RGG + long-range defaults
-RGG_RADIUS = 0.30
-LONG_RANGE_FRACTION = 0.30
-LONG_RANGE_K = 2
+RGG_RADIUS = 0.30 # radius of the RGG graph for local ties
+LONG_RANGE_FRACTION = 0.30 # fraction of long range neighbors
+LONG_RANGE_K = 2 # max number of long range connection per node

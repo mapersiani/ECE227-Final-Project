@@ -287,6 +287,15 @@ def main_run(args: argparse.Namespace) -> dict[str, list[float]]:
     from src.intervention import run_with_bot_on_graph
     from src.simulation import create_agents, run_semantic
 
+    assert args.graph in ("er", "rgglr"), "run requires --graph {er|rgglr}"
+    assert args.bot in ("off", "on"), "run requires --bot {off|on}"
+    persona_set = getattr(args, "persona_set", None)
+    assert persona_set in ("personas", "senate"), "run requires --persona-set {personas|senate}"
+    seed = getattr(args, "seed", None)
+    if seed is None:
+        seed = DEFAULT_SEED
+    args.seed = seed
+
     run_stamp, run_dir = _make_experiment_dir(
         "run",
         args.graph,
@@ -297,7 +306,6 @@ def main_run(args: argparse.Namespace) -> dict[str, list[float]]:
     logs_dir = run_dir / "logs"
     logs_dir.mkdir(parents=True, exist_ok=True)
 
-    persona_set = getattr(args, "persona_set", "personas")
     G, graph_label = _build_graph(args.graph, args.seed, persona_set=persona_set)
 
     run_id = f"{graph_label}_{'bot' if args.bot == 'on' else 'no_bot'}"
@@ -437,6 +445,7 @@ def main_run(args: argparse.Namespace) -> dict[str, list[float]]:
 def _matrix_log_path(
     matrix_dir: Path,
     graph_key: str,
+    persona_set: str,
     model: str,
     bot: str,
     seed: int,
@@ -446,7 +455,7 @@ def _matrix_log_path(
         return None
     log_dir = matrix_dir / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
-    return log_dir / f"{graph_key}_{model}_{bot}_seed{seed}_summary.jsonl"
+    return log_dir / f"{graph_key}_{persona_set}_{model}_{bot}_seed{seed}_summary.jsonl"
 
 
 def _append_matrix_rows(
@@ -454,6 +463,7 @@ def _append_matrix_rows(
     *,
     matrix_id: str,
     graph: str,
+    persona_set: str,
     model: str,
     bot: str,
     seed: int,
@@ -466,7 +476,7 @@ def _append_matrix_rows(
 ) -> None:
     if len(variances) != steps + 1:
         raise ValueError(
-            f"Expected {steps + 1} variance points but got {len(variances)} for {graph}/{model}/{bot}/seed={seed}."
+            f"Expected {steps + 1} variance points but got {len(variances)} for {graph}/{persona_set}/{model}/{bot}/seed={seed}."
         )
 
     v0 = float(variances[0])
@@ -482,6 +492,7 @@ def _append_matrix_rows(
         row = {
             "matrix_id": matrix_id,
             "graph": graph,
+            "persona_set": persona_set,
             "model": model,
             "bot": bot,
             "seed": seed,
@@ -519,6 +530,7 @@ def _write_matrix_csv(rows: list[dict[str, object]], out_path: Path) -> None:
     fieldnames = [
         "matrix_id",
         "graph",
+        "persona_set",
         "model",
         "bot",
         "seed",
@@ -555,7 +567,7 @@ def _print_matrix_summary(rows: list[dict[str, object]], final_t: int) -> dict[s
     for row in rows:
         if int(row["t"]) != final_t:
             continue
-        key = (str(row["graph"]), str(row["model"]), str(row["bot"]))
+        key = (str(row["graph"]), str(row["persona_set"]), str(row["bot"]))
         buckets[key].append(float(row["variance"]))
 
     summary: dict[str, dict[str, float | int]] = {}
@@ -578,7 +590,7 @@ def _print_matrix_summary(rows: list[dict[str, object]], final_t: int) -> dict[s
 def _plot_matrix_condition_lines(rows: list[dict[str, object]], out_path: Path) -> None:
     by_condition: dict[tuple[str, str, str], dict[int, list[float]]] = defaultdict(lambda: defaultdict(list))
     for row in rows:
-        cond = (str(row["graph"]), str(row["model"]), str(row["bot"]))
+        cond = (str(row["graph"]), str(row["persona_set"]), str(row["bot"]))
         t = int(row["t"])
         by_condition[cond][t].append(float(row["variance"]))
 
@@ -599,8 +611,8 @@ def _plot_matrix_condition_lines(rows: list[dict[str, object]], out_path: Path) 
 
 
 def _condition_label(cond: tuple[str, str, str]) -> str:
-    graph, model, bot = cond
-    return f"{graph} | {model} | bot={bot}"
+    graph, persona_set, bot = cond
+    return f"{graph} | {persona_set} | bot={bot}"
 
 
 def _plot_matrix_final_step_bars(rows: list[dict[str, object]], out_path: Path, final_t: int) -> None:
@@ -608,7 +620,7 @@ def _plot_matrix_final_step_bars(rows: list[dict[str, object]], out_path: Path, 
     for row in rows:
         if int(row["t"]) != final_t:
             continue
-        cond = (str(row["graph"]), str(row["model"]), str(row["bot"]))
+        cond = (str(row["graph"]), str(row["persona_set"]), str(row["bot"]))
         by_condition[cond].append(float(row["variance"]))
 
     conds = sorted(by_condition.keys())
@@ -631,7 +643,7 @@ def _plot_matrix_final_step_bars(rows: list[dict[str, object]], out_path: Path, 
 def _plot_matrix_variance_heatmap(rows: list[dict[str, object]], out_path: Path) -> None:
     by_condition_t: dict[tuple[str, str, str], dict[int, list[float]]] = defaultdict(lambda: defaultdict(list))
     for row in rows:
-        cond = (str(row["graph"]), str(row["model"]), str(row["bot"]))
+        cond = (str(row["graph"]), str(row["persona_set"]), str(row["bot"]))
         t = int(row["t"])
         by_condition_t[cond][t].append(float(row["variance"]))
 
@@ -658,22 +670,22 @@ def _plot_matrix_variance_heatmap(rows: list[dict[str, object]], out_path: Path)
 
 
 def _plot_matrix_bot_effect(rows: list[dict[str, object]], out_path: Path) -> None:
-    series: dict[tuple[str, str], dict[int, list[float]]] = defaultdict(lambda: defaultdict(list))
+    series: dict[tuple[str, str, str], dict[int, list[float]]] = defaultdict(lambda: defaultdict(list))
     for row in rows:
         graph = str(row["graph"])
-        model = str(row["model"])
+        persona_set = str(row["persona_set"])
         bot = str(row["bot"])
-        if model != "semantic":
+        if str(row["model"]) != "semantic":
             continue
         t = int(row["t"])
-        key = (graph, bot)
+        key = (graph, persona_set, bot)
         series[key][t].append(float(row["variance"]))
 
-    graphs = sorted({g for g, _ in series.keys()})
+    graph_persona = sorted({(g, p) for g, p, _ in series.keys()})
     plt.figure(figsize=(11, 6))
-    for graph in graphs:
-        on = series.get((graph, "on"), {})
-        off = series.get((graph, "off"), {})
+    for graph, persona_set in graph_persona:
+        on = series.get((graph, persona_set, "on"), {})
+        off = series.get((graph, persona_set, "off"), {})
         ts = sorted(set(on.keys()) & set(off.keys()))
         if not ts:
             continue
@@ -682,7 +694,7 @@ def _plot_matrix_bot_effect(rows: list[dict[str, object]], out_path: Path) -> No
             mean_on = float(np.mean(on[t]))
             mean_off = float(np.mean(off[t]))
             effects.append(mean_on - mean_off)
-        plt.plot(ts, effects, marker="o", linewidth=2, label=f"{graph}: semantic(bot on - off)")
+        plt.plot(ts, effects, marker="o", linewidth=2, label=f"{graph} | {persona_set}: bot on - off")
 
     plt.axhline(0.0, color="#374151", linewidth=1.0, linestyle="--")
     plt.xlabel("Timestep")
@@ -705,14 +717,57 @@ def _side_entropy(democrat: int, republican: int, independent: int) -> float:
     return float(-np.sum(nonzero * np.log2(nonzero)))
 
 
+def _plot_matrix_side_counts(rows: list[dict[str, object]], out_path: Path) -> None:
+    """Mean democrat/republican/independent counts over time by condition."""
+    by_cond_t: dict[tuple[str, str, str], dict[int, list[tuple[int, int, int]]]] = defaultdict(lambda: defaultdict(list))
+    for row in rows:
+        if str(row["model"]) != "semantic":
+            continue
+        if row["democrat_count"] is None:
+            continue
+        cond = (str(row["graph"]), str(row["persona_set"]), str(row["bot"]))
+        t = int(row["t"])
+        by_cond_t[cond][t].append((
+            int(row["democrat_count"]),
+            int(row["republican_count"]),
+            int(row["independent_count"]),
+        ))
+    conds = sorted(by_cond_t.keys())
+    ncols = 4
+    nrows = (len(conds) + ncols - 1) // ncols
+    fig, axes = plt.subplots(nrows, ncols, figsize=(14, 3 * nrows), squeeze=False)
+    axes = axes.flatten()
+    colors = {"democrat": "#3b82f6", "republican": "#ef4444", "independent": "#22c55e"}
+    for idx, cond in enumerate(conds):
+        ax = axes[idx]
+        ts = sorted(by_cond_t[cond].keys())
+        dem = [float(np.mean([x[0] for x in by_cond_t[cond][t]])) for t in ts]
+        rep = [float(np.mean([x[1] for x in by_cond_t[cond][t]])) for t in ts]
+        ind = [float(np.mean([x[2] for x in by_cond_t[cond][t]])) for t in ts]
+        ax.plot(ts, dem, marker="o", markersize=4, color=colors["democrat"], label="democrat")
+        ax.plot(ts, rep, marker="o", markersize=4, color=colors["republican"], label="republican")
+        ax.plot(ts, ind, marker="o", markersize=4, color=colors["independent"], label="independent")
+        ax.set_title(f"{cond[0]} | {cond[1]} | bot={cond[2]}")
+        ax.set_xlabel("t")
+        ax.legend(fontsize=7)
+        ax.grid(alpha=0.3)
+    for j in range(idx + 1, len(axes)):
+        axes[j].set_visible(False)
+    fig.suptitle("Matrix: Side Counts Over Time by Condition", fontsize=12)
+    plt.tight_layout()
+    plt.savefig(out_path, dpi=160)
+    plt.close()
+
+
 def _plot_matrix_side_entropy(rows: list[dict[str, object]], out_path: Path) -> None:
-    by_condition_t: dict[tuple[str, str], dict[int, list[float]]] = defaultdict(lambda: defaultdict(list))
+    by_condition_t: dict[tuple[str, str, str], dict[int, list[float]]] = defaultdict(lambda: defaultdict(list))
     for row in rows:
         if str(row["model"]) != "semantic":
             continue
         if row["democrat_count"] is None:
             continue
         graph = str(row["graph"])
+        persona_set = str(row["persona_set"])
         bot = str(row["bot"])
         t = int(row["t"])
         entropy = _side_entropy(
@@ -720,13 +775,13 @@ def _plot_matrix_side_entropy(rows: list[dict[str, object]], out_path: Path) -> 
             int(row["republican_count"]),
             int(row["independent_count"]),
         )
-        by_condition_t[(graph, bot)][t].append(entropy)
+        by_condition_t[(graph, persona_set, bot)][t].append(entropy)
 
     plt.figure(figsize=(11, 6))
     for cond in sorted(by_condition_t.keys()):
         ts = sorted(by_condition_t[cond].keys())
         means = [float(np.mean(by_condition_t[cond][t])) for t in ts]
-        label = f"{cond[0]} | semantic | bot={cond[1]}"
+        label = f"{cond[0]} | {cond[1]} | bot={cond[2]}"
         plt.plot(ts, means, marker="o", linewidth=2, label=label)
 
     plt.xlabel("Timestep")
@@ -862,37 +917,42 @@ def _plot_side_final_transition_matrix_bot_on_off(
 
 def _write_transition_summary_csv(
     out_path: Path,
-    transitions_by_bot: dict[str, np.ndarray],
-    final_transitions_by_bot: dict[str, np.ndarray],
-    changed_counts_by_bot: dict[str, np.ndarray],
-    total_counts_by_bot: dict[str, np.ndarray],
+    transitions_by_persona_by_bot: dict[str, dict[str, np.ndarray]],
+    final_transitions_by_persona_by_bot: dict[str, dict[str, np.ndarray]],
+    changed_counts_by_persona_by_bot: dict[str, dict[str, np.ndarray]],
+    total_counts_by_persona_by_bot: dict[str, dict[str, np.ndarray]],
 ) -> None:
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    fieldnames = ["bot", "metric", "value"]
+    fieldnames = ["persona_set", "bot", "metric", "value"]
     rows: list[dict[str, object]] = []
-    for bot in ("off", "on"):
-        step_mat = transitions_by_bot.get(bot, np.zeros((len(PERSONA_BLOCKS), len(PERSONA_BLOCKS))))
-        final_mat = final_transitions_by_bot.get(bot, np.zeros((len(PERSONA_BLOCKS), len(PERSONA_BLOCKS))))
-        total_step = float(np.sum(step_mat))
-        total_final = float(np.sum(final_mat))
-        step_stay = float(np.trace(step_mat) / total_step) if total_step > 0 else 0.0
-        final_stay = float(np.trace(final_mat) / total_final) if total_final > 0 else 0.0
-        changed = changed_counts_by_bot.get(bot, np.zeros(0, dtype=float))
-        totals = total_counts_by_bot.get(bot, np.zeros(0, dtype=float))
-        with np.errstate(divide="ignore", invalid="ignore"):
-            rates = np.divide(changed, totals, where=totals > 0)
-        mean_rate = float(np.mean(rates)) if len(rates) else 0.0
-        peak_rate = float(np.max(rates)) if len(rates) else 0.0
-        peak_step = int(np.argmax(rates) + 1) if len(rates) else 0
-        rows.extend(
-            [
-                {"bot": bot, "metric": "step_stay_rate", "value": round(step_stay, 6)},
-                {"bot": bot, "metric": "initial_to_final_stay_rate", "value": round(final_stay, 6)},
-                {"bot": bot, "metric": "mean_step_change_rate", "value": round(mean_rate, 6)},
-                {"bot": bot, "metric": "peak_step_change_rate", "value": round(peak_rate, 6)},
-                {"bot": bot, "metric": "peak_step_change_rate_step", "value": peak_step},
-            ]
-        )
+    for persona_set in sorted(transitions_by_persona_by_bot.keys()):
+        transitions_by_bot = transitions_by_persona_by_bot[persona_set]
+        final_transitions_by_bot = final_transitions_by_persona_by_bot[persona_set]
+        changed_counts_by_bot = changed_counts_by_persona_by_bot[persona_set]
+        total_counts_by_bot = total_counts_by_persona_by_bot[persona_set]
+        for bot in ("off", "on"):
+            step_mat = transitions_by_bot.get(bot, np.zeros((len(PERSONA_BLOCKS), len(PERSONA_BLOCKS))))
+            final_mat = final_transitions_by_bot.get(bot, np.zeros((len(PERSONA_BLOCKS), len(PERSONA_BLOCKS))))
+            total_step = float(np.sum(step_mat))
+            total_final = float(np.sum(final_mat))
+            step_stay = float(np.trace(step_mat) / total_step) if total_step > 0 else 0.0
+            final_stay = float(np.trace(final_mat) / total_final) if total_final > 0 else 0.0
+            changed = changed_counts_by_bot.get(bot, np.zeros(0, dtype=float))
+            totals = total_counts_by_bot.get(bot, np.zeros(0, dtype=float))
+            with np.errstate(divide="ignore", invalid="ignore"):
+                rates = np.divide(changed, totals, where=totals > 0)
+            mean_rate = float(np.mean(rates)) if len(rates) else 0.0
+            peak_rate = float(np.max(rates)) if len(rates) else 0.0
+            peak_step = int(np.argmax(rates) + 1) if len(rates) else 0
+            rows.extend(
+                [
+                    {"persona_set": persona_set, "bot": bot, "metric": "step_stay_rate", "value": round(step_stay, 6)},
+                    {"persona_set": persona_set, "bot": bot, "metric": "initial_to_final_stay_rate", "value": round(final_stay, 6)},
+                    {"persona_set": persona_set, "bot": bot, "metric": "mean_step_change_rate", "value": round(mean_rate, 6)},
+                    {"persona_set": persona_set, "bot": bot, "metric": "peak_step_change_rate", "value": round(peak_rate, 6)},
+                    {"persona_set": persona_set, "bot": bot, "metric": "peak_step_change_rate_step", "value": peak_step},
+                ]
+            )
 
     with out_path.open("w", newline="", encoding="utf-8") as fh:
         writer = csv.DictWriter(fh, fieldnames=fieldnames)
@@ -944,28 +1004,35 @@ def _plot_matrix_analysis_pack(
     rows: list[dict[str, object]],
     out_dir: Path,
     final_t: int,
-    transitions_by_bot: dict[str, np.ndarray],
-    final_transitions_by_bot: dict[str, np.ndarray],
-    changed_counts_by_bot: dict[str, np.ndarray],
-    total_counts_by_bot: dict[str, np.ndarray],
+    transitions_by_persona_by_bot: dict[str, dict[str, np.ndarray]],
+    final_transitions_by_persona_by_bot: dict[str, dict[str, np.ndarray]],
+    changed_counts_by_persona_by_bot: dict[str, dict[str, np.ndarray]],
+    total_counts_by_persona_by_bot: dict[str, dict[str, np.ndarray]],
 ) -> list[Path]:
     out_dir.mkdir(parents=True, exist_ok=True)
     files = [
         out_dir / "final_step_variance_bars.png",
         out_dir / "variance_heatmap.png",
         out_dir / "bot_effect_over_time.png",
+        out_dir / "side_counts_over_time.png",
         out_dir / "semantic_side_entropy.png",
-        out_dir / "side_transition_matrix_bot_on_off.png",
-        out_dir / "side_transition_timing_bot_on_off.png",
-        out_dir / "side_transition_matrix_initial_to_final_bot_on_off.png",
     ]
     _plot_matrix_final_step_bars(rows, files[0], final_t=final_t)
     _plot_matrix_variance_heatmap(rows, files[1])
     _plot_matrix_bot_effect(rows, files[2])
-    _plot_matrix_side_entropy(rows, files[3])
-    _plot_side_transition_matrix_bot_on_off(transitions_by_bot, files[4])
-    _plot_side_transition_timing_bot_on_off(changed_counts_by_bot, total_counts_by_bot, files[5])
-    _plot_side_final_transition_matrix_bot_on_off(final_transitions_by_bot, files[6])
+    _plot_matrix_side_counts(rows, files[3])
+    _plot_matrix_side_entropy(rows, files[4])
+    for persona_set in sorted(transitions_by_persona_by_bot.keys()):
+        t_by_bot = transitions_by_persona_by_bot[persona_set]
+        f_by_bot = final_transitions_by_persona_by_bot[persona_set]
+        c_by_bot = changed_counts_by_persona_by_bot[persona_set]
+        ttot_by_bot = total_counts_by_persona_by_bot[persona_set]
+        files.append(out_dir / f"side_transition_matrix_bot_on_off_{persona_set}.png")
+        _plot_side_transition_matrix_bot_on_off(t_by_bot, files[-1])
+        files.append(out_dir / f"side_transition_timing_bot_on_off_{persona_set}.png")
+        _plot_side_transition_timing_bot_on_off(c_by_bot, ttot_by_bot, files[-1])
+        files.append(out_dir / f"side_transition_matrix_initial_to_final_bot_on_off_{persona_set}.png")
+        _plot_side_final_transition_matrix_bot_on_off(f_by_bot, files[-1])
     return files
 
 
@@ -976,131 +1043,160 @@ def main_matrix(args: argparse.Namespace) -> dict[str, object]:
     matrix_id, matrix_dir = _make_experiment_dir(
         "matrix",
         "er-rgglr",
+        "personas-senate",
         f"seeds-{len(SEED_LIST)}",
         f"steps-{DEFAULT_STEPS}",
     )
     rows: list[dict[str, object]] = []
     matrix_graphs = ("er", "rgglr")
+    matrix_persona_sets = ("personas", "senate")
     matrix_steps = DEFAULT_STEPS
     matrix_topic = DEFAULT_TOPIC
     matrix_bot_prob = DEFAULT_BOT_POST_PROB
-    persona_set = getattr(args, "persona_set", "personas")
-    transitions_by_bot = {
-        "off": np.zeros((len(PERSONA_BLOCKS), len(PERSONA_BLOCKS)), dtype=float),
-        "on": np.zeros((len(PERSONA_BLOCKS), len(PERSONA_BLOCKS)), dtype=float),
+
+    def _init_transitions() -> dict[str, np.ndarray]:
+        return {
+            "off": np.zeros((len(PERSONA_BLOCKS), len(PERSONA_BLOCKS)), dtype=float),
+            "on": np.zeros((len(PERSONA_BLOCKS), len(PERSONA_BLOCKS)), dtype=float),
+        }
+
+    def _init_timing(steps: int) -> dict[str, np.ndarray]:
+        return {
+            "off": np.zeros(steps, dtype=float),
+            "on": np.zeros(steps, dtype=float),
+        }
+
+    transitions_by_persona_by_bot: dict[str, dict[str, np.ndarray]] = {
+        p: _init_transitions() for p in matrix_persona_sets
     }
-    final_transitions_by_bot = {
-        "off": np.zeros((len(PERSONA_BLOCKS), len(PERSONA_BLOCKS)), dtype=float),
-        "on": np.zeros((len(PERSONA_BLOCKS), len(PERSONA_BLOCKS)), dtype=float),
+    final_transitions_by_persona_by_bot: dict[str, dict[str, np.ndarray]] = {
+        p: _init_transitions() for p in matrix_persona_sets
     }
-    changed_counts_by_bot = {
-        "off": np.zeros(matrix_steps, dtype=float),
-        "on": np.zeros(matrix_steps, dtype=float),
+    changed_counts_by_persona_by_bot: dict[str, dict[str, np.ndarray]] = {
+        p: _init_timing(matrix_steps) for p in matrix_persona_sets
     }
-    total_counts_by_bot = {
-        "off": np.zeros(matrix_steps, dtype=float),
-        "on": np.zeros(matrix_steps, dtype=float),
+    total_counts_by_persona_by_bot: dict[str, dict[str, np.ndarray]] = {
+        p: _init_timing(matrix_steps) for p in matrix_persona_sets
     }
 
     print(
         "Running matrix (canonical config): "
-        f"graphs={','.join(matrix_graphs)} | seeds={SEED_LIST} | steps={matrix_steps} | topic={matrix_topic} | persona_set={persona_set}"
+        f"graphs={','.join(matrix_graphs)} | persona_sets={','.join(matrix_persona_sets)} | "
+        f"seeds={SEED_LIST} | steps={matrix_steps} | topic={matrix_topic}"
     )
     print(f"Output folder: {matrix_dir}")
 
+    rep_seed = SEED_LIST[0]
     for graph_key in matrix_graphs:
-        for seed in SEED_LIST:
-            G, graph_label = _build_graph(graph_key, seed, persona_set=persona_set)
-            base_metrics = _graph_structure_metrics(G)
+        for persona_set in matrix_persona_sets:
+            G_top, graph_label = _build_graph(graph_key, rep_seed, persona_set=persona_set)
+            topo_path = matrix_dir / f"network_topology_{graph_key}_{persona_set}.png"
+            _plot_topology(
+                G_top,
+                topo_path,
+                title=f"Matrix: {graph_label} | {persona_set} (seed={rep_seed})",
+                seed=rep_seed,
+            )
+            print(f"Saved {topo_path}")
 
-            print(f"\n[{graph_label} seed={seed}] Semantic (no bot)...")
-            semantic_log_path = _matrix_log_path(
-                matrix_dir,
-                graph_key,
-                model="semantic",
-                bot="off",
-                seed=seed,
-                enabled=args.log_runs,
-            )
-            agents = create_agents(G, topic=matrix_topic)
-            semantic_var, semantic_counts, semantic_labels = run_semantic(
-                G=G,
-                agents=agents,
-                topic=matrix_topic,
-                steps=matrix_steps,
-                show_progress=args.show_progress,
-                log_path=semantic_log_path,
-                return_side_labels=True,
-                persona_set=persona_set,
-            )
-            _accumulate_side_transitions(semantic_labels, transitions_by_bot["off"])
-            _accumulate_final_side_transitions(semantic_labels, final_transitions_by_bot["off"])
-            _accumulate_transition_timing(
-                semantic_labels,
-                changed_counts_by_bot["off"],
-                total_counts_by_bot["off"],
-            )
-            _append_matrix_rows(
-                rows,
-                matrix_id=matrix_id,
-                graph=graph_key,
-                model="semantic",
-                bot="off",
-                seed=seed,
-                steps=matrix_steps,
-                topic=matrix_topic,
-                variances=semantic_var,
-                side_counts=semantic_counts,
-                graph_metrics=base_metrics,
-                bot_degree=None,
-            )
+    for graph_key in matrix_graphs:
+        for persona_set in matrix_persona_sets:
+            for seed in SEED_LIST:
+                G, graph_label = _build_graph(graph_key, seed, persona_set=persona_set)
+                base_metrics = _graph_structure_metrics(G)
 
-            print(f"[{graph_label} seed={seed}] Semantic (+ bot)...")
-            bot_metric_agents = create_agents(G, topic=matrix_topic)
-            G_with_bot, _ = add_bot(G, bot_metric_agents, seed=seed)
-            bot_metrics = _graph_structure_metrics(G_with_bot)
-            bot_degree = int(G_with_bot.degree(G_with_bot.number_of_nodes() - 1))
+                print(f"\n[{graph_label} {persona_set} seed={seed}] Semantic (no bot)...")
+                semantic_log_path = _matrix_log_path(
+                    matrix_dir,
+                    graph_key,
+                    persona_set,
+                    model="semantic",
+                    bot="off",
+                    seed=seed,
+                    enabled=args.log_runs,
+                )
+                agents = create_agents(G, topic=matrix_topic)
+                semantic_var, semantic_counts, semantic_labels = run_semantic(
+                    G=G,
+                    agents=agents,
+                    topic=matrix_topic,
+                    steps=matrix_steps,
+                    show_progress=args.show_progress,
+                    log_path=semantic_log_path,
+                    return_side_labels=True,
+                    persona_set=persona_set,
+                )
+                _accumulate_side_transitions(semantic_labels, transitions_by_persona_by_bot[persona_set]["off"])
+                _accumulate_final_side_transitions(semantic_labels, final_transitions_by_persona_by_bot[persona_set]["off"])
+                _accumulate_transition_timing(
+                    semantic_labels,
+                    changed_counts_by_persona_by_bot[persona_set]["off"],
+                    total_counts_by_persona_by_bot[persona_set]["off"],
+                )
+                _append_matrix_rows(
+                    rows,
+                    matrix_id=matrix_id,
+                    graph=graph_key,
+                    persona_set=persona_set,
+                    model="semantic",
+                    bot="off",
+                    seed=seed,
+                    steps=matrix_steps,
+                    topic=matrix_topic,
+                    variances=semantic_var,
+                    side_counts=semantic_counts,
+                    graph_metrics=base_metrics,
+                    bot_degree=None,
+                )
 
-            bot_log_path = _matrix_log_path(
-                matrix_dir,
-                graph_key,
-                model="semantic",
-                bot="on",
-                seed=seed,
-                enabled=args.log_runs,
-            )
-            semantic_bot_var, semantic_bot_counts, semantic_bot_labels = run_with_bot_on_graph(
-                G=G,
-                topic=matrix_topic,
-                steps=matrix_steps,
-                bot_post_prob=matrix_bot_prob,
-                seed=seed,
-                log_path=bot_log_path,
-                show_progress=args.show_progress,
-                return_side_labels=True,
-                persona_set=persona_set,
-            )
-            _accumulate_side_transitions(semantic_bot_labels, transitions_by_bot["on"])
-            _accumulate_final_side_transitions(semantic_bot_labels, final_transitions_by_bot["on"])
-            _accumulate_transition_timing(
-                semantic_bot_labels,
-                changed_counts_by_bot["on"],
-                total_counts_by_bot["on"],
-            )
-            _append_matrix_rows(
-                rows,
-                matrix_id=matrix_id,
-                graph=graph_key,
-                model="semantic",
-                bot="on",
-                seed=seed,
-                steps=matrix_steps,
-                topic=matrix_topic,
-                variances=semantic_bot_var,
-                side_counts=semantic_bot_counts,
-                graph_metrics=bot_metrics,
-                bot_degree=bot_degree,
-            )
+                print(f"[{graph_label} {persona_set} seed={seed}] Semantic (+ bot)...")
+                bot_metric_agents = create_agents(G, topic=matrix_topic)
+                G_with_bot, _ = add_bot(G, bot_metric_agents, seed=seed)
+                bot_metrics = _graph_structure_metrics(G_with_bot)
+                bot_degree = int(G_with_bot.degree(G_with_bot.number_of_nodes() - 1))
+
+                bot_log_path = _matrix_log_path(
+                    matrix_dir,
+                    graph_key,
+                    persona_set,
+                    model="semantic",
+                    bot="on",
+                    seed=seed,
+                    enabled=args.log_runs,
+                )
+                semantic_bot_var, semantic_bot_counts, semantic_bot_labels = run_with_bot_on_graph(
+                    G=G,
+                    topic=matrix_topic,
+                    steps=matrix_steps,
+                    bot_post_prob=matrix_bot_prob,
+                    seed=seed,
+                    log_path=bot_log_path,
+                    show_progress=args.show_progress,
+                    return_side_labels=True,
+                    persona_set=persona_set,
+                )
+                _accumulate_side_transitions(semantic_bot_labels, transitions_by_persona_by_bot[persona_set]["on"])
+                _accumulate_final_side_transitions(semantic_bot_labels, final_transitions_by_persona_by_bot[persona_set]["on"])
+                _accumulate_transition_timing(
+                    semantic_bot_labels,
+                    changed_counts_by_persona_by_bot[persona_set]["on"],
+                    total_counts_by_persona_by_bot[persona_set]["on"],
+                )
+                _append_matrix_rows(
+                    rows,
+                    matrix_id=matrix_id,
+                    graph=graph_key,
+                    persona_set=persona_set,
+                    model="semantic",
+                    bot="on",
+                    seed=seed,
+                    steps=matrix_steps,
+                    topic=matrix_topic,
+                    variances=semantic_bot_var,
+                    side_counts=semantic_bot_counts,
+                    graph_metrics=bot_metrics,
+                    bot_degree=bot_degree,
+                )
 
     out_path = matrix_dir / "matrix_results.csv"
     _write_matrix_csv(rows, out_path)
@@ -1116,10 +1212,10 @@ def main_matrix(args: argparse.Namespace) -> dict[str, object]:
         rows,
         matrix_dir,
         final_t=matrix_steps,
-        transitions_by_bot=transitions_by_bot,
-        final_transitions_by_bot=final_transitions_by_bot,
-        changed_counts_by_bot=changed_counts_by_bot,
-        total_counts_by_bot=total_counts_by_bot,
+        transitions_by_persona_by_bot=transitions_by_persona_by_bot,
+        final_transitions_by_persona_by_bot=final_transitions_by_persona_by_bot,
+        changed_counts_by_persona_by_bot=changed_counts_by_persona_by_bot,
+        total_counts_by_persona_by_bot=total_counts_by_persona_by_bot,
     )
     for p in analysis_plots:
         print(f"Saved {p}")
@@ -1127,10 +1223,10 @@ def main_matrix(args: argparse.Namespace) -> dict[str, object]:
     transition_summary_path = matrix_dir / "side_transition_summary.csv"
     _write_transition_summary_csv(
         transition_summary_path,
-        transitions_by_bot=transitions_by_bot,
-        final_transitions_by_bot=final_transitions_by_bot,
-        changed_counts_by_bot=changed_counts_by_bot,
-        total_counts_by_bot=total_counts_by_bot,
+        transitions_by_persona_by_bot=transitions_by_persona_by_bot,
+        final_transitions_by_persona_by_bot=final_transitions_by_persona_by_bot,
+        changed_counts_by_persona_by_bot=changed_counts_by_persona_by_bot,
+        total_counts_by_persona_by_bot=total_counts_by_persona_by_bot,
     )
     print(f"Saved {transition_summary_path}")
 
@@ -1141,7 +1237,7 @@ def main_matrix(args: argparse.Namespace) -> dict[str, object]:
                 "matrix_id": matrix_id,
                 "output_dir": str(matrix_dir),
                 "graphs": list(matrix_graphs),
-                "persona_set": persona_set,
+                "persona_sets": list(matrix_persona_sets),
                 "seeds": SEED_LIST,
                 "steps": matrix_steps,
                 "topic": matrix_topic,
@@ -1175,14 +1271,19 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="mode")
 
     p_run = sub.add_parser("run", help="Run one canonical condition (semantic/SBERT only)")
-    p_run.add_argument("--graph", choices=["er", "rgglr"], required=True)
-    p_run.add_argument("--bot", choices=["off", "on"], required=True)
-    p_run.add_argument("--seed", type=int, choices=SEED_LIST, default=DEFAULT_SEED)
+    p_run.add_argument("--graph", choices=["er", "rgglr"], required=True, help="Graph structure: er or rgglr")
+    p_run.add_argument("--bot", choices=["off", "on"], required=True, help="Bot: off or on")
     p_run.add_argument(
         "--persona-set",
         choices=["personas", "senate"],
-        default="personas",
+        required=True,
         help="Node file: personas (data/nodes.json) or senate (data/senate_nodes.json)",
+    )
+    p_run.add_argument(
+        "--seed",
+        type=int,
+        default=DEFAULT_SEED,
+        help=f"Random seed (default: {DEFAULT_SEED})",
     )
     p_run.add_argument(
         "--no-log",
@@ -1191,13 +1292,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_run.set_defaults(func=main_run)
 
-    p_matrix = sub.add_parser("matrix", help="Run canonical ER/RGGLR x semantic x bot on/off matrix")
-    p_matrix.add_argument(
-        "--persona-set",
-        choices=["personas", "senate"],
-        default="personas",
-        help="Node file: personas (data/nodes.json) or senate (data/senate_nodes.json)",
-    )
+    p_matrix = sub.add_parser("matrix", help="Run full matrix: ER/RGGLR x personas/senate x bot on/off")
     p_matrix.add_argument(
         "--out",
         type=str,
