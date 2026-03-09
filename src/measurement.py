@@ -74,6 +74,43 @@ def semantic_variance(embeddings: np.ndarray) -> float:
     return float(np.mean(np.sum((embeddings - centroid) ** 2, axis=1)))
 
 
+def _side_from_name(name: str) -> str:
+    for side in PERSONA_BLOCKS:
+        if name.startswith(side):
+            return side
+    return "other"
+
+
+def _ensure_persona_prototypes() -> tuple[np.ndarray, list[str]]:
+    global _persona_proto_mat, _persona_side_labels
+    model = _get_model(show_progress=False)
+    if _persona_proto_mat is None or _persona_side_labels is None:
+        nodes = load_nodes()
+        names = [n.get("name", "") for n in nodes]
+        texts = [n.get("initial") or n.get("prompt") or "" for n in nodes]
+        _persona_side_labels = [_side_from_name(n) for n in names]
+        _persona_proto_mat = model.encode(texts, convert_to_numpy=True, show_progress_bar=False)
+    return _persona_proto_mat, _persona_side_labels
+
+
+def classify_side_labels(embeddings: np.ndarray) -> list[str]:
+    """
+    Classify each embedding into one coarse side label.
+    """
+    proto_mat, side_labels = _ensure_persona_prototypes()
+
+    emb_norm = embeddings / (np.linalg.norm(embeddings, axis=1, keepdims=True) + 1e-8)
+    proto_norm = proto_mat / (np.linalg.norm(proto_mat, axis=1, keepdims=True) + 1e-8)
+    sims = emb_norm @ proto_norm.T
+    nn = np.argmax(sims, axis=1)
+
+    labels: list[str] = []
+    for j in nn:
+        side = side_labels[int(j)]
+        labels.append(side if side in PERSONA_BLOCKS else "other")
+    return labels
+
+
 def classify_sides(embeddings: np.ndarray) -> dict[str, int]:
     """
     Classify each embedding into one of the four coarse sides
@@ -89,34 +126,8 @@ def classify_sides(embeddings: np.ndarray) -> dict[str, int]:
     Returns:
         Dict side -> count at this timestep.
     """
-    global _persona_proto_mat, _persona_side_labels
-
-    def side_from_name(name: str) -> str:
-        for s in PERSONA_BLOCKS:
-            if name.startswith(s):
-                return s
-        return "other"
-
-    model = _get_model(show_progress=False)
-    if _persona_proto_mat is None or _persona_side_labels is None:
-        nodes = load_nodes()
-        names = [n.get("name", "") for n in nodes]
-        texts = [n.get("initial") or n.get("prompt") or "" for n in nodes]
-        _persona_side_labels = [side_from_name(n) for n in names]
-        _persona_proto_mat = model.encode(texts, convert_to_numpy=True, show_progress_bar=False)
-
-    proto_mat = _persona_proto_mat  # (m, d), m = number of personas in nodes.json
-    side_labels = _persona_side_labels
-
-    # Cosine similarity between each embedding and each persona prototype
-    emb_norm = embeddings / (np.linalg.norm(embeddings, axis=1, keepdims=True) + 1e-8)
-    proto_norm = proto_mat / (np.linalg.norm(proto_mat, axis=1, keepdims=True) + 1e-8)
-    sims = emb_norm @ proto_norm.T  # (n_agents, m_personas)
-    nn = np.argmax(sims, axis=1)
-
     counts = {k: 0 for k in PERSONA_BLOCKS}
-    for j in nn:
-        side = side_labels[int(j)]
+    for side in classify_side_labels(embeddings):
         if side in counts:
             counts[side] += 1
     return counts

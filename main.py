@@ -842,7 +842,216 @@ def _plot_matrix_side_entropy(rows: list[dict[str, object]], out_path: Path) -> 
     plt.close()
 
 
-def _plot_matrix_analysis_pack(rows: list[dict[str, object]], out_dir: Path, final_t: int) -> list[Path]:
+def _accumulate_side_transitions(
+    side_labels_over_time: list[list[str]],
+    transition_counts: np.ndarray,
+) -> None:
+    side_index = {side: idx for idx, side in enumerate(PERSONA_BLOCKS)}
+    for t in range(len(side_labels_over_time) - 1):
+        src_labels = side_labels_over_time[t]
+        dst_labels = side_labels_over_time[t + 1]
+        n = min(len(src_labels), len(dst_labels))
+        for i in range(n):
+            src = src_labels[i]
+            dst = dst_labels[i]
+            if src in side_index and dst in side_index:
+                transition_counts[side_index[src], side_index[dst]] += 1.0
+
+
+def _accumulate_final_side_transitions(
+    side_labels_over_time: list[list[str]],
+    transition_counts: np.ndarray,
+) -> None:
+    if len(side_labels_over_time) < 2:
+        return
+    side_index = {side: idx for idx, side in enumerate(PERSONA_BLOCKS)}
+    src_labels = side_labels_over_time[0]
+    dst_labels = side_labels_over_time[-1]
+    n = min(len(src_labels), len(dst_labels))
+    for i in range(n):
+        src = src_labels[i]
+        dst = dst_labels[i]
+        if src in side_index and dst in side_index:
+            transition_counts[side_index[src], side_index[dst]] += 1.0
+
+
+def _accumulate_transition_timing(
+    side_labels_over_time: list[list[str]],
+    changed_counts: np.ndarray,
+    total_counts: np.ndarray,
+) -> None:
+    side_index = {side: idx for idx, side in enumerate(PERSONA_BLOCKS)}
+    for t in range(len(side_labels_over_time) - 1):
+        src_labels = side_labels_over_time[t]
+        dst_labels = side_labels_over_time[t + 1]
+        n = min(len(src_labels), len(dst_labels))
+        for i in range(n):
+            src = src_labels[i]
+            dst = dst_labels[i]
+            if src in side_index and dst in side_index:
+                total_counts[t] += 1.0
+                if src != dst:
+                    changed_counts[t] += 1.0
+
+
+def _plot_side_transition_timing_bot_on_off(
+    changed_counts_by_bot: dict[str, np.ndarray],
+    total_counts_by_bot: dict[str, np.ndarray],
+    out_path: Path,
+) -> None:
+    plt.figure(figsize=(11, 6))
+    for bot in ("off", "on"):
+        changed = changed_counts_by_bot.get(bot)
+        total = total_counts_by_bot.get(bot)
+        if changed is None or total is None or len(changed) == 0:
+            continue
+        with np.errstate(divide="ignore", invalid="ignore"):
+            rates = np.divide(changed, total, where=total > 0) * 100.0
+        ts = np.arange(1, len(rates) + 1)
+        plt.plot(ts, rates, marker="o", linewidth=2, label=f"bot={bot}")
+
+    plt.xlabel("Transition Step (t -> t+1)")
+    plt.ylabel("Agents Changing Side (%)")
+    plt.title("Matrix: Side Transition Timing by Bot Condition")
+    plt.grid(alpha=0.3)
+    plt.legend(fontsize=10)
+    plt.tight_layout()
+    plt.savefig(out_path, dpi=160)
+    plt.close()
+
+
+def _plot_side_final_transition_matrix_bot_on_off(
+    final_transitions_by_bot: dict[str, np.ndarray],
+    out_path: Path,
+) -> None:
+    bots = ("off", "on")
+    mats = [
+        final_transitions_by_bot.get(bot, np.zeros((len(PERSONA_BLOCKS), len(PERSONA_BLOCKS))))
+        for bot in bots
+    ]
+    norm_mats: list[np.ndarray] = []
+    for mat in mats:
+        row_sum = mat.sum(axis=1, keepdims=True)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            norm = np.divide(mat, row_sum, where=row_sum > 0)
+        norm_mats.append(norm)
+
+    fig, axes = plt.subplots(1, 2, figsize=(14, 6), constrained_layout=True)
+    vmax = max(float(np.max(norm)) for norm in norm_mats) if norm_mats else 1.0
+    vmax = max(vmax, 1e-6)
+    im = None
+    for ax, bot, raw_mat, norm_mat in zip(axes, bots, mats, norm_mats):
+        im = ax.imshow(norm_mat, cmap="YlOrRd", vmin=0.0, vmax=vmax)
+        ax.set_title(f"bot={bot}")
+        ax.set_xlabel("Final side (t=final)")
+        ax.set_ylabel("Initial side (t=0)")
+        ax.set_xticks(np.arange(len(PERSONA_BLOCKS)))
+        ax.set_yticks(np.arange(len(PERSONA_BLOCKS)))
+        ax.set_xticklabels(PERSONA_BLOCKS, rotation=25, ha="right")
+        ax.set_yticklabels(PERSONA_BLOCKS)
+        for i in range(len(PERSONA_BLOCKS)):
+            for j in range(len(PERSONA_BLOCKS)):
+                pct = norm_mat[i, j] * 100.0
+                cnt = int(raw_mat[i, j])
+                text_color = "white" if norm_mat[i, j] > 0.55 * vmax else "#111827"
+                ax.text(j, i, f"{pct:.0f}%\n(n={cnt})", ha="center", va="center", fontsize=8, color=text_color)
+
+    if im is not None:
+        fig.colorbar(im, ax=axes, shrink=0.85, label="Probability from Initial Side")
+    fig.suptitle("Matrix: Initial -> Final Side Transition by Bot Condition", fontsize=13)
+    plt.savefig(out_path, dpi=160)
+    plt.close()
+
+
+def _write_transition_summary_csv(
+    out_path: Path,
+    transitions_by_bot: dict[str, np.ndarray],
+    final_transitions_by_bot: dict[str, np.ndarray],
+    changed_counts_by_bot: dict[str, np.ndarray],
+    total_counts_by_bot: dict[str, np.ndarray],
+) -> None:
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    fieldnames = ["bot", "metric", "value"]
+    rows: list[dict[str, object]] = []
+    for bot in ("off", "on"):
+        step_mat = transitions_by_bot.get(bot, np.zeros((len(PERSONA_BLOCKS), len(PERSONA_BLOCKS))))
+        final_mat = final_transitions_by_bot.get(bot, np.zeros((len(PERSONA_BLOCKS), len(PERSONA_BLOCKS))))
+        total_step = float(np.sum(step_mat))
+        total_final = float(np.sum(final_mat))
+        step_stay = float(np.trace(step_mat) / total_step) if total_step > 0 else 0.0
+        final_stay = float(np.trace(final_mat) / total_final) if total_final > 0 else 0.0
+        changed = changed_counts_by_bot.get(bot, np.zeros(0, dtype=float))
+        totals = total_counts_by_bot.get(bot, np.zeros(0, dtype=float))
+        with np.errstate(divide="ignore", invalid="ignore"):
+            rates = np.divide(changed, totals, where=totals > 0)
+        mean_rate = float(np.mean(rates)) if len(rates) else 0.0
+        peak_rate = float(np.max(rates)) if len(rates) else 0.0
+        peak_step = int(np.argmax(rates) + 1) if len(rates) else 0
+        rows.extend(
+            [
+                {"bot": bot, "metric": "step_stay_rate", "value": round(step_stay, 6)},
+                {"bot": bot, "metric": "initial_to_final_stay_rate", "value": round(final_stay, 6)},
+                {"bot": bot, "metric": "mean_step_change_rate", "value": round(mean_rate, 6)},
+                {"bot": bot, "metric": "peak_step_change_rate", "value": round(peak_rate, 6)},
+                {"bot": bot, "metric": "peak_step_change_rate_step", "value": peak_step},
+            ]
+        )
+
+    with out_path.open("w", newline="", encoding="utf-8") as fh:
+        writer = csv.DictWriter(fh, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def _plot_side_transition_matrix_bot_on_off(
+    transitions_by_bot: dict[str, np.ndarray],
+    out_path: Path,
+) -> None:
+    bots = ("off", "on")
+    mats = [transitions_by_bot.get(bot, np.zeros((len(PERSONA_BLOCKS), len(PERSONA_BLOCKS)))) for bot in bots]
+    norm_mats: list[np.ndarray] = []
+    for mat in mats:
+        row_sum = mat.sum(axis=1, keepdims=True)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            norm = np.divide(mat, row_sum, where=row_sum > 0)
+        norm_mats.append(norm)
+
+    fig, axes = plt.subplots(1, 2, figsize=(14, 6), constrained_layout=True)
+    vmax = max(float(np.max(norm)) for norm in norm_mats) if norm_mats else 1.0
+    vmax = max(vmax, 1e-6)
+    im = None
+    for ax, bot, raw_mat, norm_mat in zip(axes, bots, mats, norm_mats):
+        im = ax.imshow(norm_mat, cmap="Blues", vmin=0.0, vmax=vmax)
+        ax.set_title(f"bot={bot}")
+        ax.set_xlabel("To side (t+1)")
+        ax.set_ylabel("From side (t)")
+        ax.set_xticks(np.arange(len(PERSONA_BLOCKS)))
+        ax.set_yticks(np.arange(len(PERSONA_BLOCKS)))
+        ax.set_xticklabels(PERSONA_BLOCKS, rotation=25, ha="right")
+        ax.set_yticklabels(PERSONA_BLOCKS)
+        for i in range(len(PERSONA_BLOCKS)):
+            for j in range(len(PERSONA_BLOCKS)):
+                pct = norm_mat[i, j] * 100.0
+                cnt = int(raw_mat[i, j])
+                text_color = "white" if norm_mat[i, j] > 0.55 * vmax else "#111827"
+                ax.text(j, i, f"{pct:.0f}%\n(n={cnt})", ha="center", va="center", fontsize=8, color=text_color)
+
+    if im is not None:
+        fig.colorbar(im, ax=axes, shrink=0.85, label="Transition Probability")
+    fig.suptitle("Matrix: Side Transition (t -> t+1) by Bot Condition", fontsize=13)
+    plt.savefig(out_path, dpi=160)
+    plt.close()
+
+
+def _plot_matrix_analysis_pack(
+    rows: list[dict[str, object]],
+    out_dir: Path,
+    final_t: int,
+    transitions_by_bot: dict[str, np.ndarray],
+    final_transitions_by_bot: dict[str, np.ndarray],
+    changed_counts_by_bot: dict[str, np.ndarray],
+    total_counts_by_bot: dict[str, np.ndarray],
+) -> list[Path]:
     out_dir.mkdir(parents=True, exist_ok=True)
     files = [
         out_dir / "final_step_variance_bars.png",
@@ -850,12 +1059,18 @@ def _plot_matrix_analysis_pack(rows: list[dict[str, object]], out_dir: Path, fin
         out_dir / "bot_effect_over_time.png",
         out_dir / "semantic_degroot_gap.png",
         out_dir / "semantic_side_entropy.png",
+        out_dir / "side_transition_matrix_bot_on_off.png",
+        out_dir / "side_transition_timing_bot_on_off.png",
+        out_dir / "side_transition_matrix_initial_to_final_bot_on_off.png",
     ]
     _plot_matrix_final_step_bars(rows, files[0], final_t=final_t)
     _plot_matrix_variance_heatmap(rows, files[1])
     _plot_matrix_bot_effect(rows, files[2])
     _plot_matrix_degroot_semantic_gap(rows, files[3])
     _plot_matrix_side_entropy(rows, files[4])
+    _plot_side_transition_matrix_bot_on_off(transitions_by_bot, files[5])
+    _plot_side_transition_timing_bot_on_off(changed_counts_by_bot, total_counts_by_bot, files[6])
+    _plot_side_final_transition_matrix_bot_on_off(final_transitions_by_bot, files[7])
     return files
 
 
@@ -874,6 +1089,22 @@ def main_matrix(args: argparse.Namespace) -> dict[str, object]:
     matrix_steps = DEFAULT_STEPS
     matrix_topic = DEFAULT_TOPIC
     matrix_bot_prob = DEFAULT_BOT_POST_PROB
+    transitions_by_bot = {
+        "off": np.zeros((len(PERSONA_BLOCKS), len(PERSONA_BLOCKS)), dtype=float),
+        "on": np.zeros((len(PERSONA_BLOCKS), len(PERSONA_BLOCKS)), dtype=float),
+    }
+    final_transitions_by_bot = {
+        "off": np.zeros((len(PERSONA_BLOCKS), len(PERSONA_BLOCKS)), dtype=float),
+        "on": np.zeros((len(PERSONA_BLOCKS), len(PERSONA_BLOCKS)), dtype=float),
+    }
+    changed_counts_by_bot = {
+        "off": np.zeros(matrix_steps, dtype=float),
+        "on": np.zeros(matrix_steps, dtype=float),
+    }
+    total_counts_by_bot = {
+        "off": np.zeros(matrix_steps, dtype=float),
+        "on": np.zeros(matrix_steps, dtype=float),
+    }
 
     print(
         "Running matrix (canonical config): "
@@ -915,13 +1146,21 @@ def main_matrix(args: argparse.Namespace) -> dict[str, object]:
                 enabled=args.log_runs,
             )
             agents = create_agents(G, topic=matrix_topic)
-            semantic_var, semantic_counts = run_semantic(
+            semantic_var, semantic_counts, semantic_labels = run_semantic(
                 G=G,
                 agents=agents,
                 topic=matrix_topic,
                 steps=matrix_steps,
                 show_progress=args.show_progress,
                 log_path=semantic_log_path,
+                return_side_labels=True,
+            )
+            _accumulate_side_transitions(semantic_labels, transitions_by_bot["off"])
+            _accumulate_final_side_transitions(semantic_labels, final_transitions_by_bot["off"])
+            _accumulate_transition_timing(
+                semantic_labels,
+                changed_counts_by_bot["off"],
+                total_counts_by_bot["off"],
             )
             _append_matrix_rows(
                 rows,
@@ -952,7 +1191,7 @@ def main_matrix(args: argparse.Namespace) -> dict[str, object]:
                 seed=seed,
                 enabled=args.log_runs,
             )
-            semantic_bot_var, semantic_bot_counts = run_with_bot_on_graph(
+            semantic_bot_var, semantic_bot_counts, semantic_bot_labels = run_with_bot_on_graph(
                 G=G,
                 topic=matrix_topic,
                 steps=matrix_steps,
@@ -960,6 +1199,14 @@ def main_matrix(args: argparse.Namespace) -> dict[str, object]:
                 seed=seed,
                 log_path=bot_log_path,
                 show_progress=args.show_progress,
+                return_side_labels=True,
+            )
+            _accumulate_side_transitions(semantic_bot_labels, transitions_by_bot["on"])
+            _accumulate_final_side_transitions(semantic_bot_labels, final_transitions_by_bot["on"])
+            _accumulate_transition_timing(
+                semantic_bot_labels,
+                changed_counts_by_bot["on"],
+                total_counts_by_bot["on"],
             )
             _append_matrix_rows(
                 rows,
@@ -986,9 +1233,27 @@ def main_matrix(args: argparse.Namespace) -> dict[str, object]:
     _plot_matrix_condition_lines(rows, condition_plot)
     print(f"Saved {condition_plot}")
 
-    analysis_plots = _plot_matrix_analysis_pack(rows, matrix_dir, final_t=matrix_steps)
+    analysis_plots = _plot_matrix_analysis_pack(
+        rows,
+        matrix_dir,
+        final_t=matrix_steps,
+        transitions_by_bot=transitions_by_bot,
+        final_transitions_by_bot=final_transitions_by_bot,
+        changed_counts_by_bot=changed_counts_by_bot,
+        total_counts_by_bot=total_counts_by_bot,
+    )
     for p in analysis_plots:
         print(f"Saved {p}")
+
+    transition_summary_path = matrix_dir / "side_transition_summary.csv"
+    _write_transition_summary_csv(
+        transition_summary_path,
+        transitions_by_bot=transitions_by_bot,
+        final_transitions_by_bot=final_transitions_by_bot,
+        changed_counts_by_bot=changed_counts_by_bot,
+        total_counts_by_bot=total_counts_by_bot,
+    )
+    print(f"Saved {transition_summary_path}")
 
     summary_path = matrix_dir / "matrix_summary.json"
     summary_path.write_text(
@@ -1001,6 +1266,7 @@ def main_matrix(args: argparse.Namespace) -> dict[str, object]:
                 "steps": matrix_steps,
                 "topic": matrix_topic,
                 "final_step_summary": summary,
+                "transition_summary_csv": str(transition_summary_path),
                 "rows": len(rows),
             },
             indent=2,

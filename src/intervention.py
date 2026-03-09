@@ -14,9 +14,15 @@ import networkx as nx
 import numpy as np
 
 from src.agent import Agent
-from src.config import BOT_INJECTION_STEP, DEFAULT_STEPS, MAX_CHARS_PER_NEIGHBOR, MAX_NEIGHBORS_PER_UPDATE
+from src.config import (
+    BOT_INJECTION_STEP,
+    DEFAULT_STEPS,
+    MAX_CHARS_PER_NEIGHBOR,
+    MAX_NEIGHBORS_PER_UPDATE,
+    PERSONA_BLOCKS,
+)
 from src.llm_client import get_updated_opinion, prepare_neighbor_opinions
-from src.measurement import classify_sides, embed_opinions, semantic_variance
+from src.measurement import classify_side_labels, embed_opinions, semantic_variance
 from src.simulation import create_agents
 
 BOT_PERSONA = (
@@ -129,9 +135,12 @@ def run_with_bot_on_graph(
     log_path: Optional[str | Path] = None,
     show_progress: bool = True,
     return_state: bool = False,
+    return_side_labels: bool = False,
 ) -> (
     tuple[list[float], list[dict[str, int]]]
+    | tuple[list[float], list[dict[str, int]], list[list[str]]]
     | tuple[list[float], list[dict[str, int]], nx.Graph, list[Agent]]
+    | tuple[list[float], list[dict[str, int]], list[list[str]], nx.Graph, list[Agent]]
 ):
     """Run semantic simulation with bot on a provided graph (bot injected at t=0)."""
     agents = create_agents(G, topic=topic)
@@ -142,6 +151,14 @@ def run_with_bot_on_graph(
 
     variances: list[float] = []
     side_counts: list[dict[str, int]] = []
+    side_labels_over_time: list[list[str]] = []
+
+    def _counts_from_labels(labels: list[str]) -> dict[str, int]:
+        counts = {side: 0 for side in PERSONA_BLOCKS}
+        for side in labels:
+            if side in counts:
+                counts[side] += 1
+        return counts
 
     log_fh = None
     run_t0 = perf_counter()
@@ -168,7 +185,10 @@ def run_with_bot_on_graph(
     opinions = [a.current_opinion for a in agents]
     emb0 = embed_opinions(opinions)
     variances.append(semantic_variance(emb0))
-    side_counts.append(classify_sides(emb0))
+    labels0 = classify_side_labels(emb0)
+    side_counts.append(_counts_from_labels(labels0))
+    if return_side_labels:
+        side_labels_over_time.append(labels0)
 
     step_range = range(1, steps + 1)
     if show_progress:
@@ -179,7 +199,10 @@ def run_with_bot_on_graph(
         opinions = [a.current_opinion for a in agents]
         emb = embed_opinions(opinions)
         variances.append(semantic_variance(emb))
-        side_counts.append(classify_sides(emb))
+        labels = classify_side_labels(emb)
+        side_counts.append(_counts_from_labels(labels))
+        if return_side_labels:
+            side_labels_over_time.append(labels)
         llm_updates = int(step_stats["llm_updates"])
         bot_amplified_updates = int(step_stats["bot_amplified_updates"])
         total_llm_updates += llm_updates
@@ -208,5 +231,9 @@ def run_with_bot_on_graph(
         log_fh.write(json.dumps(final, ensure_ascii=False) + "\n")
         log_fh.close()
     if return_state:
+        if return_side_labels:
+            return variances, side_counts, side_labels_over_time, G, agents
         return variances, side_counts, G, agents
+    if return_side_labels:
+        return variances, side_counts, side_labels_over_time
     return variances, side_counts
