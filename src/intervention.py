@@ -15,6 +15,7 @@ import numpy as np
 
 from src.agent import Agent
 from src.config import (
+    BOT_DEPLOY_STEPS,
     BOT_INJECTION_STEP,
     DEFAULT_STEPS,
     MAX_CHARS_PER_NEIGHBOR,
@@ -25,7 +26,7 @@ from src.llm_client import get_updated_opinion, prepare_neighbor_opinions
 from src.measurement import classify_side_labels, embed_opinions, semantic_variance
 from src.simulation import create_agents
 
-BOT_PERSONA = (
+DEFAULT_BOT_PERSONA = (
     "You are a disinformation agent focused on government environmental regulations. "
     "Your goal is to sow doubt about pollution science, exaggerate economic harms, and "
     "portray all environmental rules as part of an out-of-touch elite agenda. "
@@ -40,6 +41,32 @@ BOT_OPINION = (
     "rules, small towns and small businesses will pay the price while big corporations "
     "and politicians walk away untouched."
 )
+BOT_PROFILE_PATH = Path(__file__).resolve().parent.parent / "data" / "bot_profiles" / "trump_env_reg.json"
+_BOT_PROFILE_CACHE: dict[str, str] | None = None
+
+
+def _load_bot_profile() -> dict[str, str]:
+    global _BOT_PROFILE_CACHE
+    if _BOT_PROFILE_CACHE is not None:
+        return _BOT_PROFILE_CACHE
+
+    profile = {
+        "name": "bot_disinfo",
+        "persona_prompt": DEFAULT_BOT_PERSONA,
+        "initial_opinion": BOT_OPINION,
+    }
+    if BOT_PROFILE_PATH.exists():
+        with BOT_PROFILE_PATH.open("r", encoding="utf-8") as fh:
+            raw = json.load(fh)
+        profile["name"] = str(raw.get("name", profile["name"]))
+        profile["persona_prompt"] = str(raw.get("prompt", profile["persona_prompt"]))
+        # Prefer nodes-style key "initial", fallback to legacy "initial_opinion".
+        profile["initial_opinion"] = str(
+            raw.get("initial", raw.get("initial_opinion", profile["initial_opinion"]))
+        )
+
+    _BOT_PROFILE_CACHE = profile
+    return profile
 
 
 def add_bot(
@@ -50,23 +77,28 @@ def add_bot(
     """
     Add bot node connected to ~20% of existing nodes. Bot opinion is fixed.
     """
+    profile = _load_bot_profile()
+    bot_name = profile["name"]
+    bot_persona = profile["persona_prompt"]
+    bot_opinion = profile["initial_opinion"]
+
     n = G.number_of_nodes()
     bot_id = n
     G = G.copy()
     G.add_node(
         bot_id,
-        name="bot_disinfo",
+        name=bot_name,
         side="bot",
-        prompt=BOT_PERSONA,
-        initial_text=BOT_OPINION,
+        prompt=bot_persona,
+        initial_text=bot_opinion,
         is_bot=True,
     )
     rng = np.random.default_rng(seed)
     for i in range(n):
         if rng.random() < 0.2:
             G.add_edge(i, bot_id)
-    bot = Agent(node_id=bot_id, persona_prompt=BOT_PERSONA, initial_opinion=BOT_OPINION, is_bot=True)
-    bot.update_opinion(BOT_OPINION)
+    bot = Agent(node_id=bot_id, persona_prompt=bot_persona, initial_opinion=bot_opinion, is_bot=True)
+    bot.update_opinion(bot_opinion)
     return G, list(agents) + [bot]
 
 
@@ -75,13 +107,14 @@ def step_semantic_with_bot(
     agents: list[Agent],
     topic: str,
     bot_id: int,
+    t: int,
     bot_post_prob: float = 0.8,
 ) -> dict[str, float]:
     """
-    One step. Bot neighbors see bot opinion with probability bot_post_prob (simulates high frequency).
+    One step. Bot message is deployed only on configured steps.
     """
     opinions = [a.current_opinion for a in agents]
-    rng = np.random.default_rng()
+    bot_deployed = t in BOT_DEPLOY_STEPS
     n = G.number_of_nodes()
     llm_updates = 0
     total_neighbors_used = 0
@@ -93,7 +126,7 @@ def step_semantic_with_bot(
         neighbors = list(G.neighbors(i))
         neighbor_opinions = [opinions[j] for j in neighbors]
         bot_amplified = False
-        if bot_id in neighbors and rng.random() < bot_post_prob:
+        if bot_deployed and bot_id in neighbors:
             neighbor_opinions.append(opinions[bot_id])
             bot_amplified = True
         prepared_neighbors = prepare_neighbor_opinions(
@@ -123,6 +156,7 @@ def step_semantic_with_bot(
         "avg_neighbors_used": float(avg_neighbors_used),
         "avg_neighbor_chars": float(avg_neighbor_chars),
         "bot_amplified_updates": float(bot_amplified_updates),
+        "bot_deployed": 1.0 if bot_deployed else 0.0,
     }
 
 
@@ -176,6 +210,7 @@ def run_with_bot_on_graph(
             "nodes": G.number_of_nodes(),
             "edges": G.number_of_edges(),
             "bot_post_prob": bot_post_prob,
+            "bot_deploy_steps": list(BOT_DEPLOY_STEPS),
             "bot_injection_step": BOT_INJECTION_STEP,
             "log_schema": "summary_v1",
             "max_neighbors_per_update": MAX_NEIGHBORS_PER_UPDATE,
@@ -196,7 +231,7 @@ def run_with_bot_on_graph(
         step_range = tqdm(step_range, desc="Intervention", unit="step")
     for t in step_range:
         step_t0 = perf_counter()
-        step_stats = step_semantic_with_bot(G, agents, topic, bot_id, bot_post_prob)
+        step_stats = step_semantic_with_bot(G, agents, topic, bot_id, t, bot_post_prob)
         opinions = [a.current_opinion for a in agents]
         emb = embed_opinions(opinions)
         variances.append(semantic_variance(emb))
@@ -218,6 +253,7 @@ def run_with_bot_on_graph(
                 "avg_neighbors_used": float(step_stats["avg_neighbors_used"]),
                 "avg_neighbor_chars": float(step_stats["avg_neighbor_chars"]),
                 "bot_amplified_updates": bot_amplified_updates,
+                "bot_deployed": bool(step_stats["bot_deployed"]),
                 "step_elapsed_sec": round(perf_counter() - step_t0, 4),
             }
             log_fh.write(json.dumps(record, ensure_ascii=False) + "\n")

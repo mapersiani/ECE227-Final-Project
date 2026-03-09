@@ -18,6 +18,7 @@ SIMULATION_STEPS = 2
 DEFAULT_ER_EDGE_PROB = 0.15
 DEFAULT_BOT_POST_PROB = 0.80  # Probability that a bot posts in a given step (vs. remaining silent).
 BOT_INJECTION_STEP = 0
+BOT_DEPLOY_STEPS = (1, 5, 10)
 # Logging policy: compact per-step summaries only.
 DEFAULT_LOG_MODE = "summary"
 # Prompt budget controls for semantic updates (speed/stability).
