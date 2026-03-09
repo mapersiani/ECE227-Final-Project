@@ -9,13 +9,13 @@ import networkx as nx
 import numpy as np
 
 from src.config import (
-    DEFAULT_N,
     DEFAULT_SEED,
     LONG_RANGE_FRACTION,
     LONG_RANGE_K,
     PERSONA_BLOCK_LAYOUT,
     PERSONA_BLOCKS,
     RGG_RADIUS,
+    side_from_name,
 )
 
 
@@ -30,16 +30,13 @@ class RGGLongRangeParams:
 
 
 def _side_for_name(name: str) -> str:
-    for side in PERSONA_BLOCKS:
-        if name.startswith(side):
-            return side
-    return "unknown"
+    return side_from_name(name)
 
 
 def _block_for_name(name: str) -> Tuple[int, float]:
-    for prefix, (block_id, x_center) in PERSONA_BLOCK_LAYOUT.items():
-        if name.startswith(prefix):
-            return block_id, x_center
+    side = _side_for_name(name)
+    if side in PERSONA_BLOCK_LAYOUT:
+        return PERSONA_BLOCK_LAYOUT[side]
     return (1, 0.50)
 
 
@@ -54,9 +51,7 @@ def _assign_positions(names: list[str], seed: Optional[int]) -> np.ndarray:
 
 
 def create_rgg_long_range_graph(nodes: list[dict], params: RGGLongRangeParams) -> nx.Graph:
-    """Build a graph from persona records with local and long-range edges."""
-    if len(nodes) != DEFAULT_N:
-        raise ValueError(f"RGGLR requires exactly {DEFAULT_N} nodes, got {len(nodes)}.")
+    """Build a graph from persona records with local and long-range edges. Node count is dynamic."""
     rng = np.random.default_rng(params.seed)
     names = [n.get("name", f"node_{i}") for i, n in enumerate(nodes)]
     n = len(names)

@@ -24,7 +24,7 @@ def create_agents(G: nx.Graph, topic: str = DEFAULT_TOPIC) -> List[Agent]:
     """
     Create one agent per node in the ER graph.
 
-    Uses node attributes from ``network.create_graph``:
+    Uses node attributes from the graph (er.py, rgg_long_range.py):
     - ``prompt``: persona prompt for the LLM
     - ``initial_text``: initial opinion text
     """
@@ -96,6 +96,7 @@ def run_semantic(
     show_progress: bool = True,
     log_path: Optional[str | Path] = None,
     return_side_labels: bool = False,
+    persona_set: str = "personas",
 ) -> tuple[List[float], List[dict[str, int]]] | tuple[List[float], List[dict[str, int]], list[list[str]]]:
     """
     Run semantic simulation for ``steps`` steps.
@@ -137,7 +138,7 @@ def run_semantic(
     opinions = [a.current_opinion for a in agents]
     emb0 = embed_opinions(opinions)
     variances.append(semantic_variance(emb0))
-    labels0 = classify_side_labels(emb0)
+    labels0 = classify_side_labels(emb0, persona_set=persona_set)
     side_counts.append(_counts_from_labels(labels0))
     if return_side_labels:
         side_labels_over_time.append(labels0)
@@ -151,7 +152,7 @@ def run_semantic(
         opinions = [a.current_opinion for a in agents]
         emb = embed_opinions(opinions)
         variances.append(semantic_variance(emb))
-        labels = classify_side_labels(emb)
+        labels = classify_side_labels(emb, persona_set=persona_set)
         side_counts.append(_counts_from_labels(labels))
         if return_side_labels:
             side_labels_over_time.append(labels)

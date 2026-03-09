@@ -35,11 +35,9 @@ import numpy as np
 from matplotlib.colors import Normalize
 
 from src.config import (
-    DEGROOT_SCALAR_BY_BLOCK,
     DEFAULT_BOT_POST_PROB,
     DEFAULT_ER_EDGE_PROB,
     DEFAULT_LOG_MODE,
-    DEFAULT_N,
     DEFAULT_SEED,
     DEFAULT_STEPS,
     DEFAULT_TOPIC,
@@ -85,10 +83,9 @@ def _plot_topology(G: nx.Graph, out_path: Path, title: str, seed: int = DEFAULT_
     pos = _node_positions(G, seed=seed)
 
     side_colors = {
-        "left": "#3b82f6",
-        "center_left": "#22c55e",
-        "center_right": "#f59e0b",
-        "right": "#ef4444",
+        "democrat": "#3b82f6",
+        "republican": "#ef4444",
+        "independent": "#22c55e",
         "bot": "#111827",
         "unknown": "#9ca3af",
     }
@@ -190,7 +187,7 @@ def _plot_drift_network(
 
     sm = plt.cm.ScalarMappable(cmap=cmap, norm=Normalize(vmin=vmin, vmax=vmax))
     sm.set_array([])
-    plt.colorbar(sm, label="Opinion Drift (cosine Δ from initial)")
+    plt.colorbar(sm, ax=plt.gca(), label="Opinion Drift (cosine Δ from initial)")
 
     plt.title(title)
     plt.xlabel("Ideological Position")
@@ -204,15 +201,9 @@ def _plot_drift_network(
 def _write_run_timeseries_csv(
     out_path: Path,
     semantic_var: Optional[list[float]],
-    degroot_var: Optional[list[float]],
     side_counts: Optional[list[dict[str, int]]],
 ) -> None:
-    max_len = 0
-    if semantic_var is not None:
-        max_len = max(max_len, len(semantic_var))
-    if degroot_var is not None:
-        max_len = max(max_len, len(degroot_var))
-    if max_len == 0:
+    if semantic_var is None or len(semantic_var) == 0:
         return
 
     with out_path.open("w", newline="", encoding="utf-8") as fh:
@@ -221,37 +212,33 @@ def _write_run_timeseries_csv(
             fieldnames=[
                 "t",
                 "semantic_variance",
-                "degroot_variance",
-                "left_count",
-                "center_left_count",
-                "center_right_count",
-                "right_count",
+                "democrat_count",
+                "republican_count",
+                "independent_count",
             ],
         )
         writer.writeheader()
-        for t in range(max_len):
+        for t in range(len(semantic_var)):
             counts = side_counts[t] if side_counts is not None and t < len(side_counts) else {}
             writer.writerow(
                 {
                     "t": t,
-                    "semantic_variance": semantic_var[t] if semantic_var is not None and t < len(semantic_var) else None,
-                    "degroot_variance": degroot_var[t] if degroot_var is not None and t < len(degroot_var) else None,
-                    "left_count": counts.get("left"),
-                    "center_left_count": counts.get("center_left"),
-                    "center_right_count": counts.get("center_right"),
-                    "right_count": counts.get("right"),
+                    "semantic_variance": semantic_var[t],
+                    "democrat_count": counts.get("democrat"),
+                    "republican_count": counts.get("republican"),
+                    "independent_count": counts.get("independent"),
                 }
             )
 
-def _build_graph(graph_key: str, seed: int):
+def _build_graph(graph_key: str, seed: int, persona_set: str = "personas"):
     from src.graphs.er import create_er_graph
     from src.graphs.rgg_long_range import RGGLongRangeParams, create_rgg_long_range_graph
-    from src.network import load_nodes
+    from src.load_nodes import load_nodes
 
     if graph_key == "er":
-        return create_er_graph(edge_prob=DEFAULT_ER_EDGE_PROB, seed=seed), "ER"
+        return create_er_graph(edge_prob=DEFAULT_ER_EDGE_PROB, seed=seed, persona_set=persona_set), "ER"
 
-    nodes = load_nodes()
+    nodes = load_nodes(persona_set)
     params = RGGLongRangeParams(
         radius=RGG_RADIUS,
         long_range_fraction=LONG_RANGE_FRACTION,
@@ -296,17 +283,6 @@ def _graph_structure_metrics(G) -> dict[str, float | int]:
     }
 
 
-def _degroot_variance_series(G, steps: int) -> list[float]:
-    from src.network import run_degroot
-
-    side_map = DEGROOT_SCALAR_BY_BLOCK
-    n = G.number_of_nodes()
-    sides = [G.nodes[i].get("side", "center_left") for i in range(n)]
-    initial_scalar = np.array([side_map.get(s, 0.5) for s in sides], dtype=float)
-    history = run_degroot(G, initial_scalar, steps=steps)
-    return [float(np.var(h)) for h in history]
-
-
 def main_run(args: argparse.Namespace) -> dict[str, list[float]]:
     from src.intervention import run_with_bot_on_graph
     from src.simulation import create_agents, run_semantic
@@ -314,38 +290,32 @@ def main_run(args: argparse.Namespace) -> dict[str, list[float]]:
     run_stamp, run_dir = _make_experiment_dir(
         "run",
         args.graph,
-        args.model,
+        "semantic",
         f"bot-{args.bot}",
         f"seed-{args.seed}",
     )
     logs_dir = run_dir / "logs"
     logs_dir.mkdir(parents=True, exist_ok=True)
 
-    G, graph_label = _build_graph(args.graph, args.seed)
-
-    if G.number_of_nodes() != DEFAULT_N:
-        raise ValueError(f"{graph_label} graph must initialize with {DEFAULT_N} nodes.")
-
-    if args.bot == "on" and args.model in {"degroot", "both"}:
-        raise ValueError("DeGroot comparison currently supports --bot off only.")
+    persona_set = getattr(args, "persona_set", "personas")
+    G, graph_label = _build_graph(args.graph, args.seed, persona_set=persona_set)
 
     run_id = f"{graph_label}_{'bot' if args.bot == 'on' else 'no_bot'}"
-    print(f"Running {run_id} | model={args.model} | topic={DEFAULT_TOPIC}")
+    print(f"Running {run_id} | topic={DEFAULT_TOPIC} | persona_set={persona_set}")
     print(f"Graph: nodes={G.number_of_nodes()}, edges={G.number_of_edges()}, seed={args.seed}")
     print(f"Output folder: {run_dir}")
 
     log_path = None
-    if args.model in {"semantic", "both"} and not args.no_log:
+    if not args.no_log:
         log_path = logs_dir / "step_summary.jsonl"
         print(f"Logging compact {DEFAULT_LOG_MODE} records to {log_path}")
 
     semantic_var: list[float] | None = None
-    degroot_var: list[float] | None = None
     side_counts: list[dict[str, int]] | None = None
     semantic_graph = G
     semantic_agents = None
 
-    if args.model in {"semantic", "both"}:
+    if True:  # always run semantic
         if args.bot == "on":
             semantic_var, side_counts, semantic_graph, semantic_agents = run_with_bot_on_graph(
                 G=G,
@@ -356,6 +326,7 @@ def main_run(args: argparse.Namespace) -> dict[str, list[float]]:
                 log_path=log_path,
                 show_progress=True,
                 return_state=True,
+                persona_set=persona_set,
             )
         else:
             agents = create_agents(G, topic=DEFAULT_TOPIC)
@@ -365,17 +336,12 @@ def main_run(args: argparse.Namespace) -> dict[str, list[float]]:
                 topic=DEFAULT_TOPIC,
                 steps=DEFAULT_STEPS,
                 log_path=log_path,
+                persona_set=persona_set,
             )
             semantic_agents = agents
             semantic_graph = G
         print("\nSemantic variance over time:")
         for t, v in enumerate(semantic_var):
-            print(f"  t={t}: {v:.4f}")
-
-    if args.model in {"degroot", "both"}:
-        degroot_var = _degroot_variance_series(G, steps=DEFAULT_STEPS)
-        print("\nDeGroot variance over time:")
-        for t, v in enumerate(degroot_var):
             print(f"  t={t}: {v:.4f}")
 
     display_graph = semantic_graph if args.bot == "on" and semantic_graph is not None else G
@@ -395,32 +361,6 @@ def main_run(args: argparse.Namespace) -> dict[str, list[float]]:
         plt.xlabel("Timestep")
         plt.ylabel("Semantic Variance")
         plt.title(f"{run_id}: Semantic Variance")
-        plt.grid(True)
-        plt.savefig(out, dpi=160)
-        plt.close()
-        print(f"Saved {out}")
-
-    if degroot_var is not None:
-        out = _save_plot(run_dir, "degroot_variance.png")
-        plt.figure()
-        plt.plot(degroot_var, marker="s", color="orange")
-        plt.xlabel("Timestep")
-        plt.ylabel("Opinion Variance")
-        plt.title(f"{run_id}: DeGroot Variance")
-        plt.grid(True)
-        plt.savefig(out, dpi=160)
-        plt.close()
-        print(f"Saved {out}")
-
-    if semantic_var is not None and degroot_var is not None:
-        out = _save_plot(run_dir, "semantic_vs_degroot.png")
-        plt.figure()
-        plt.plot(semantic_var, marker="o", label="Semantic (LLM)")
-        plt.plot(degroot_var, marker="s", label="DeGroot")
-        plt.xlabel("Timestep")
-        plt.ylabel("Variance")
-        plt.title(f"{run_id}: Semantic vs DeGroot")
-        plt.legend()
         plt.grid(True)
         plt.savefig(out, dpi=160)
         plt.close()
@@ -455,7 +395,7 @@ def main_run(args: argparse.Namespace) -> dict[str, list[float]]:
         print(f"Saved {drift_path}")
 
     timeseries_path = run_dir / "timeseries.csv"
-    _write_run_timeseries_csv(timeseries_path, semantic_var, degroot_var, side_counts)
+    _write_run_timeseries_csv(timeseries_path, semantic_var, side_counts)
     print(f"Saved {timeseries_path}")
 
     summary = {
@@ -464,7 +404,7 @@ def main_run(args: argparse.Namespace) -> dict[str, list[float]]:
         "output_dir": str(run_dir),
         "graph": args.graph,
         "graph_label": graph_label,
-        "model": args.model,
+        "model": "semantic",
         "bot": args.bot,
         "seed": args.seed,
         "topic": DEFAULT_TOPIC,
@@ -483,8 +423,6 @@ def main_run(args: argparse.Namespace) -> dict[str, list[float]]:
     }
     if semantic_var is not None:
         summary["semantic_final_variance"] = float(semantic_var[-1])
-    if degroot_var is not None:
-        summary["degroot_final_variance"] = float(degroot_var[-1])
 
     summary_path = run_dir / "run_summary.json"
     summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
@@ -493,8 +431,6 @@ def main_run(args: argparse.Namespace) -> dict[str, list[float]]:
     out: dict[str, list[float]] = {}
     if semantic_var is not None:
         out["semantic"] = semantic_var
-    if degroot_var is not None:
-        out["degroot"] = degroot_var
     return out
 
 
@@ -538,11 +474,10 @@ def _append_matrix_rows(
 
     for t, variance in enumerate(variances):
         counts = side_counts[t] if side_counts is not None else None
-        left = counts.get("left", 0) if counts else None
-        center_left = counts.get("center_left", 0) if counts else None
-        center_right = counts.get("center_right", 0) if counts else None
-        right = counts.get("right", 0) if counts else None
-        measured_agents = (left + center_left + center_right + right) if counts else None
+        democrat = counts.get("democrat", 0) if counts else None
+        republican = counts.get("republican", 0) if counts else None
+        independent = counts.get("independent", 0) if counts else None
+        measured_agents = (democrat + republican + independent) if counts else None
 
         row = {
             "matrix_id": matrix_id,
@@ -555,10 +490,9 @@ def _append_matrix_rows(
             "variance": float(variance),
             "delta_from_t0": float(variance) - v0,
             "delta_from_prev": None if prev is None else float(variance) - prev,
-            "left_count": left,
-            "center_left_count": center_left,
-            "center_right_count": center_right,
-            "right_count": right,
+            "democrat_count": democrat,
+            "republican_count": republican,
+            "independent_count": independent,
             "measured_agents": measured_agents,
             "graph_nodes": graph_metrics["nodes"],
             "graph_edges": graph_metrics["edges"],
@@ -593,10 +527,9 @@ def _write_matrix_csv(rows: list[dict[str, object]], out_path: Path) -> None:
         "variance",
         "delta_from_t0",
         "delta_from_prev",
-        "left_count",
-        "center_left_count",
-        "center_right_count",
-        "right_count",
+        "democrat_count",
+        "republican_count",
+        "independent_count",
         "measured_agents",
         "graph_nodes",
         "graph_edges",
@@ -762,43 +695,8 @@ def _plot_matrix_bot_effect(rows: list[dict[str, object]], out_path: Path) -> No
     plt.close()
 
 
-def _plot_matrix_degroot_semantic_gap(rows: list[dict[str, object]], out_path: Path) -> None:
-    series: dict[tuple[str, str], dict[int, list[float]]] = defaultdict(lambda: defaultdict(list))
-    for row in rows:
-        graph = str(row["graph"])
-        model = str(row["model"])
-        bot = str(row["bot"])
-        t = int(row["t"])
-        key = (graph, f"{model}|{bot}")
-        series[key][t].append(float(row["variance"]))
-
-    graphs = sorted({g for g, _ in series.keys()})
-    plt.figure(figsize=(11, 6))
-    for graph in graphs:
-        sem = series.get((graph, "semantic|off"), {})
-        deg = series.get((graph, "degroot|off"), {})
-        ts = sorted(set(sem.keys()) & set(deg.keys()))
-        if not ts:
-            continue
-        gaps: list[float] = []
-        for t in ts:
-            mean_sem = float(np.mean(sem[t]))
-            mean_deg = float(np.mean(deg[t]))
-            gaps.append(mean_sem - mean_deg)
-        plt.plot(ts, gaps, marker="o", linewidth=2, label=f"{graph}: semantic(off) - degroot(off)")
-
-    plt.xlabel("Timestep")
-    plt.ylabel("Variance Gap")
-    plt.title("Matrix: Semantic vs DeGroot Gap Over Time")
-    plt.grid(alpha=0.3)
-    plt.legend(fontsize=9)
-    plt.tight_layout()
-    plt.savefig(out_path, dpi=160)
-    plt.close()
-
-
-def _side_entropy(left: int, center_left: int, center_right: int, right: int) -> float:
-    counts = np.array([left, center_left, center_right, right], dtype=float)
+def _side_entropy(democrat: int, republican: int, independent: int) -> float:
+    counts = np.array([democrat, republican, independent], dtype=float)
     total = float(np.sum(counts))
     if total <= 0:
         return 0.0
@@ -812,16 +710,15 @@ def _plot_matrix_side_entropy(rows: list[dict[str, object]], out_path: Path) -> 
     for row in rows:
         if str(row["model"]) != "semantic":
             continue
-        if row["left_count"] is None:
+        if row["democrat_count"] is None:
             continue
         graph = str(row["graph"])
         bot = str(row["bot"])
         t = int(row["t"])
         entropy = _side_entropy(
-            int(row["left_count"]),
-            int(row["center_left_count"]),
-            int(row["center_right_count"]),
-            int(row["right_count"]),
+            int(row["democrat_count"]),
+            int(row["republican_count"]),
+            int(row["independent_count"]),
         )
         by_condition_t[(graph, bot)][t].append(entropy)
 
@@ -1057,7 +954,6 @@ def _plot_matrix_analysis_pack(
         out_dir / "final_step_variance_bars.png",
         out_dir / "variance_heatmap.png",
         out_dir / "bot_effect_over_time.png",
-        out_dir / "semantic_degroot_gap.png",
         out_dir / "semantic_side_entropy.png",
         out_dir / "side_transition_matrix_bot_on_off.png",
         out_dir / "side_transition_timing_bot_on_off.png",
@@ -1066,11 +962,10 @@ def _plot_matrix_analysis_pack(
     _plot_matrix_final_step_bars(rows, files[0], final_t=final_t)
     _plot_matrix_variance_heatmap(rows, files[1])
     _plot_matrix_bot_effect(rows, files[2])
-    _plot_matrix_degroot_semantic_gap(rows, files[3])
-    _plot_matrix_side_entropy(rows, files[4])
-    _plot_side_transition_matrix_bot_on_off(transitions_by_bot, files[5])
-    _plot_side_transition_timing_bot_on_off(changed_counts_by_bot, total_counts_by_bot, files[6])
-    _plot_side_final_transition_matrix_bot_on_off(final_transitions_by_bot, files[7])
+    _plot_matrix_side_entropy(rows, files[3])
+    _plot_side_transition_matrix_bot_on_off(transitions_by_bot, files[4])
+    _plot_side_transition_timing_bot_on_off(changed_counts_by_bot, total_counts_by_bot, files[5])
+    _plot_side_final_transition_matrix_bot_on_off(final_transitions_by_bot, files[6])
     return files
 
 
@@ -1089,6 +984,7 @@ def main_matrix(args: argparse.Namespace) -> dict[str, object]:
     matrix_steps = DEFAULT_STEPS
     matrix_topic = DEFAULT_TOPIC
     matrix_bot_prob = DEFAULT_BOT_POST_PROB
+    persona_set = getattr(args, "persona_set", "personas")
     transitions_by_bot = {
         "off": np.zeros((len(PERSONA_BLOCKS), len(PERSONA_BLOCKS)), dtype=float),
         "on": np.zeros((len(PERSONA_BLOCKS), len(PERSONA_BLOCKS)), dtype=float),
@@ -1108,35 +1004,16 @@ def main_matrix(args: argparse.Namespace) -> dict[str, object]:
 
     print(
         "Running matrix (canonical config): "
-        f"graphs={','.join(matrix_graphs)} | seeds={SEED_LIST} | steps={matrix_steps} | topic={matrix_topic}"
+        f"graphs={','.join(matrix_graphs)} | seeds={SEED_LIST} | steps={matrix_steps} | topic={matrix_topic} | persona_set={persona_set}"
     )
     print(f"Output folder: {matrix_dir}")
 
     for graph_key in matrix_graphs:
         for seed in SEED_LIST:
-            G, graph_label = _build_graph(graph_key, seed)
-            if G.number_of_nodes() != DEFAULT_N:
-                raise ValueError(f"{graph_label} graph must initialize with {DEFAULT_N} nodes.")
-
+            G, graph_label = _build_graph(graph_key, seed, persona_set=persona_set)
             base_metrics = _graph_structure_metrics(G)
-            print(f"\n[{graph_label} seed={seed}] DeGroot baseline...")
-            degroot_var = _degroot_variance_series(G, steps=matrix_steps)
-            _append_matrix_rows(
-                rows,
-                matrix_id=matrix_id,
-                graph=graph_key,
-                model="degroot",
-                bot="off",
-                seed=seed,
-                steps=matrix_steps,
-                topic=matrix_topic,
-                variances=degroot_var,
-                side_counts=None,
-                graph_metrics=base_metrics,
-                bot_degree=None,
-            )
 
-            print(f"[{graph_label} seed={seed}] Semantic (no bot)...")
+            print(f"\n[{graph_label} seed={seed}] Semantic (no bot)...")
             semantic_log_path = _matrix_log_path(
                 matrix_dir,
                 graph_key,
@@ -1154,6 +1031,7 @@ def main_matrix(args: argparse.Namespace) -> dict[str, object]:
                 show_progress=args.show_progress,
                 log_path=semantic_log_path,
                 return_side_labels=True,
+                persona_set=persona_set,
             )
             _accumulate_side_transitions(semantic_labels, transitions_by_bot["off"])
             _accumulate_final_side_transitions(semantic_labels, final_transitions_by_bot["off"])
@@ -1200,6 +1078,7 @@ def main_matrix(args: argparse.Namespace) -> dict[str, object]:
                 log_path=bot_log_path,
                 show_progress=args.show_progress,
                 return_side_labels=True,
+                persona_set=persona_set,
             )
             _accumulate_side_transitions(semantic_bot_labels, transitions_by_bot["on"])
             _accumulate_final_side_transitions(semantic_bot_labels, final_transitions_by_bot["on"])
@@ -1262,6 +1141,7 @@ def main_matrix(args: argparse.Namespace) -> dict[str, object]:
                 "matrix_id": matrix_id,
                 "output_dir": str(matrix_dir),
                 "graphs": list(matrix_graphs),
+                "persona_set": persona_set,
                 "seeds": SEED_LIST,
                 "steps": matrix_steps,
                 "topic": matrix_topic,
@@ -1294,11 +1174,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub = parser.add_subparsers(dest="mode")
 
-    p_run = sub.add_parser("run", help="Run one canonical condition")
+    p_run = sub.add_parser("run", help="Run one canonical condition (semantic/SBERT only)")
     p_run.add_argument("--graph", choices=["er", "rgglr"], required=True)
     p_run.add_argument("--bot", choices=["off", "on"], required=True)
-    p_run.add_argument("--model", choices=["semantic", "degroot", "both"], default="both")
     p_run.add_argument("--seed", type=int, choices=SEED_LIST, default=DEFAULT_SEED)
+    p_run.add_argument(
+        "--persona-set",
+        choices=["personas", "senate"],
+        default="personas",
+        help="Node file: personas (data/nodes.json) or senate (data/senate_nodes.json)",
+    )
     p_run.add_argument(
         "--no-log",
         action="store_true",
@@ -1306,7 +1191,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_run.set_defaults(func=main_run)
 
-    p_matrix = sub.add_parser("matrix", help="Run canonical ER/RGGLR x DeGroot/Semantic x bot/off matrix")
+    p_matrix = sub.add_parser("matrix", help="Run canonical ER/RGGLR x semantic x bot on/off matrix")
+    p_matrix.add_argument(
+        "--persona-set",
+        choices=["personas", "senate"],
+        default="personas",
+        help="Node file: personas (data/nodes.json) or senate (data/senate_nodes.json)",
+    )
     p_matrix.add_argument(
         "--out",
         type=str,

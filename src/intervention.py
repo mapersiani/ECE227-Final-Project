@@ -136,6 +136,7 @@ def run_with_bot_on_graph(
     show_progress: bool = True,
     return_state: bool = False,
     return_side_labels: bool = False,
+    persona_set: str = "personas",
 ) -> (
     tuple[list[float], list[dict[str, int]]]
     | tuple[list[float], list[dict[str, int]], list[list[str]]]
@@ -185,7 +186,7 @@ def run_with_bot_on_graph(
     opinions = [a.current_opinion for a in agents]
     emb0 = embed_opinions(opinions)
     variances.append(semantic_variance(emb0))
-    labels0 = classify_side_labels(emb0)
+    labels0 = classify_side_labels(emb0, persona_set=persona_set)
     side_counts.append(_counts_from_labels(labels0))
     if return_side_labels:
         side_labels_over_time.append(labels0)
@@ -199,7 +200,7 @@ def run_with_bot_on_graph(
         opinions = [a.current_opinion for a in agents]
         emb = embed_opinions(opinions)
         variances.append(semantic_variance(emb))
-        labels = classify_side_labels(emb)
+        labels = classify_side_labels(emb, persona_set=persona_set)
         side_counts.append(_counts_from_labels(labels))
         if return_side_labels:
             side_labels_over_time.append(labels)

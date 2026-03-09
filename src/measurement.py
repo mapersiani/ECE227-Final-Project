@@ -12,8 +12,8 @@ from typing import Optional
 
 import numpy as np
 
-from src.config import PERSONA_BLOCKS
-from src.network import load_nodes
+from src.config import PERSONA_BLOCKS, side_from_name
+from src.load_nodes import load_nodes
 
 os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
 os.environ.setdefault("HF_HUB_VERBOSITY", "error")
@@ -26,8 +26,8 @@ logging.getLogger("sentence_transformers").setLevel(logging.ERROR)
 from sentence_transformers import SentenceTransformer
 
 _model_cache: Optional["SentenceTransformer"] = None
-_persona_proto_mat: Optional[np.ndarray] = None
-_persona_side_labels: Optional[list[str]] = None
+# Cache prototypes per persona_set: persona_set -> (proto_mat, side_labels)
+_persona_proto_cache: dict[str, tuple[np.ndarray, list[str]]] = {}
 
 
 def _get_model(show_progress: bool = True) -> "SentenceTransformer":
@@ -75,29 +75,31 @@ def semantic_variance(embeddings: np.ndarray) -> float:
 
 
 def _side_from_name(name: str) -> str:
-    for side in PERSONA_BLOCKS:
-        if name.startswith(side):
-            return side
-    return "other"
+    s = side_from_name(name)
+    return s if s in PERSONA_BLOCKS else "other"
 
 
-def _ensure_persona_prototypes() -> tuple[np.ndarray, list[str]]:
-    global _persona_proto_mat, _persona_side_labels
+def _ensure_persona_prototypes(persona_set: str = "personas") -> tuple[np.ndarray, list[str]]:
+    global _persona_proto_cache
     model = _get_model(show_progress=False)
-    if _persona_proto_mat is None or _persona_side_labels is None:
-        nodes = load_nodes()
+    if persona_set not in _persona_proto_cache:
+        nodes = load_nodes(persona_set)
         names = [n.get("name", "") for n in nodes]
         texts = [n.get("initial") or n.get("prompt") or "" for n in nodes]
-        _persona_side_labels = [_side_from_name(n) for n in names]
-        _persona_proto_mat = model.encode(texts, convert_to_numpy=True, show_progress_bar=False)
-    return _persona_proto_mat, _persona_side_labels
+        side_labels = [_side_from_name(n) for n in names]
+        proto_mat = model.encode(texts, convert_to_numpy=True, show_progress_bar=False)
+        _persona_proto_cache[persona_set] = (proto_mat, side_labels)
+    return _persona_proto_cache[persona_set]
 
 
-def classify_side_labels(embeddings: np.ndarray) -> list[str]:
+def classify_side_labels(
+    embeddings: np.ndarray,
+    persona_set: str = "personas",
+) -> list[str]:
     """
     Classify each embedding into one coarse side label.
     """
-    proto_mat, side_labels = _ensure_persona_prototypes()
+    proto_mat, side_labels = _ensure_persona_prototypes(persona_set)
 
     emb_norm = embeddings / (np.linalg.norm(embeddings, axis=1, keepdims=True) + 1e-8)
     proto_norm = proto_mat / (np.linalg.norm(proto_mat, axis=1, keepdims=True) + 1e-8)
@@ -111,23 +113,22 @@ def classify_side_labels(embeddings: np.ndarray) -> list[str]:
     return labels
 
 
-def classify_sides(embeddings: np.ndarray) -> dict[str, int]:
+def classify_sides(
+    embeddings: np.ndarray,
+    persona_set: str = "personas",
+) -> dict[str, int]:
     """
-    Classify each embedding into one of the four coarse sides
-    (left, center_left, center_right, right).
+    Classify each embedding into one of the coarse sides (democrat, republican, independent).
 
-    Method: nearest-neighbor (cosine similarity) to *persona prototypes* built from
-    `nodes.json` initial opinions. After assigning each agent to the closest persona,
-    we map that persona to its side using the persona `name` prefix.
-
-    This ensures timestep 0 classification matches the underlying `nodes.json` balance
-    (e.g., 9/9/9/9 if `nodes.json` contains 9 personas per side).
+    Method: nearest-neighbor (cosine similarity) to persona prototypes built from
+    the selected nodes file. After assigning each agent to the closest persona,
+    we map that persona to its side using the persona `name` prefix (party_firstname_lastname).
 
     Returns:
         Dict side -> count at this timestep.
     """
     counts = {k: 0 for k in PERSONA_BLOCKS}
-    for side in classify_side_labels(embeddings):
+    for side in classify_side_labels(embeddings, persona_set=persona_set):
         if side in counts:
             counts[side] += 1
     return counts
