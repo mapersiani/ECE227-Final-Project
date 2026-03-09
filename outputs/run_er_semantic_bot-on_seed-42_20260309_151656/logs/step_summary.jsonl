@@ -1,0 +1,1 @@
+{"type": "meta", "topic": "Government Environmental Regulations", "steps": 10, "nodes": 37, "edges": 97, "bot_post_prob": 0.8, "bot_injection_step": 0, "log_schema": "summary_v1", "max_neighbors_per_update": 6, "max_chars_per_neighbor": 320}

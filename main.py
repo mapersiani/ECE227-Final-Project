@@ -167,8 +167,8 @@ def _plot_drift_network(
     local_edges = [(u, v) for u, v, d in G.edges(data=True) if d.get("edge_type") != "long_range"]
     long_edges = [(u, v) for u, v, d in G.edges(data=True) if d.get("edge_type") == "long_range"]
 
-    plt.figure(figsize=(12, 8))
-    nx.draw_networkx_edges(G, pos, edgelist=local_edges, alpha=0.22, edge_color="#9ca3af", width=1.0)
+    fig, ax = plt.subplots(figsize=(12, 8))
+    nx.draw_networkx_edges(G, pos, edgelist=local_edges, alpha=0.22, edge_color="#9ca3af", width=1.0, ax=ax)
     if long_edges:
         nx.draw_networkx_edges(
             G,
@@ -178,23 +178,32 @@ def _plot_drift_network(
             edge_color="#8b5cf6",
             style="dashed",
             width=1.2,
+            ax=ax,
         )
-    nx.draw_networkx_nodes(G, pos, node_color=colors, node_size=250, linewidths=0.5, edgecolors="white")
+    nx.draw_networkx_nodes(
+        G,
+        pos,
+        node_color=colors,
+        node_size=250,
+        linewidths=0.5,
+        edgecolors="white",
+        ax=ax,
+    )
 
     top_nodes = [n for n, _ in sorted(drift.items(), key=lambda x: x[1], reverse=True)[:10]]
     labels = {int(n): str(G.nodes[int(n)].get("name", n)).split("_")[-1] for n in top_nodes if int(n) in G.nodes}
-    nx.draw_networkx_labels(G, pos, labels, font_size=7)
+    nx.draw_networkx_labels(G, pos, labels, font_size=7, ax=ax)
 
     sm = plt.cm.ScalarMappable(cmap=cmap, norm=Normalize(vmin=vmin, vmax=vmax))
     sm.set_array([])
-    plt.colorbar(sm, ax=plt.gca(), label="Opinion Drift (cosine Δ from initial)")
+    fig.colorbar(sm, ax=plt.gca(), ax=ax, label="Opinion Drift (cosine Δ from initial)")
 
-    plt.title(title)
-    plt.xlabel("Ideological Position")
-    plt.ylabel("Engagement Level")
-    plt.grid(alpha=0.2)
-    plt.tight_layout()
-    plt.savefig(out_path, dpi=160)
+    ax.set_title(title)
+    ax.set_xlabel("Ideological Position")
+    ax.set_ylabel("Engagement Level")
+    ax.grid(alpha=0.2)
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=160)
     plt.close()
 
 
@@ -1049,7 +1058,6 @@ def main_matrix(args: argparse.Namespace) -> dict[str, object]:
     )
     rows: list[dict[str, object]] = []
     matrix_graphs = ("er", "rgglr")
-    matrix_persona_sets = ("personas", "senate")
     matrix_steps = DEFAULT_STEPS
     matrix_topic = DEFAULT_TOPIC
     matrix_bot_prob = DEFAULT_BOT_POST_PROB
@@ -1292,7 +1300,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_run.set_defaults(func=main_run)
 
-    p_matrix = sub.add_parser("matrix", help="Run full matrix: ER/RGGLR x personas/senate x bot on/off")
+    p_matrix = sub.add_parser("matrix", help="Run canonical ER/RGGLR x DeGroot/Semantic x bot/off matrix")
     p_matrix.add_argument(
         "--out",
         type=str,

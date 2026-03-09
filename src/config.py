@@ -14,7 +14,7 @@ TOPIC = "Government Environmental Regulations"
 # Canonical 3-seed set for reproducible multi-run comparisons.
 SEED_LIST = [11, 23, 42]
 DEFAULT_SEED = SEED_LIST[2]
-SIMULATION_STEPS = 10
+SIMULATION_STEPS = 2
 DEFAULT_ER_EDGE_PROB = 0.15
 DEFAULT_BOT_POST_PROB = 0.80  # Probability that a bot posts in a given step (vs. remaining silent).
 BOT_INJECTION_STEP = 0
