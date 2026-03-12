@@ -25,7 +25,3 @@ class Agent:
     def update_opinion(self, new_opinion: str) -> None:
         """Replace current opinion with LLM-generated update."""
         self.current_opinion = new_opinion
-
-    def reset(self) -> None:
-        """Restore opinion to initial value."""
-        self.current_opinion = self.initial_opinion

@@ -12,4 +12,7 @@ build/
 .pytest_cache/
 .coverage
 htmlcov/
-outputs/
+.vscode/
+.DS_Store
+
+.cache/

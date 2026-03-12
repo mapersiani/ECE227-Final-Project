@@ -1,44 +1,48 @@
 """
 Configuration and constants for the simulation.
 
-Loads .env for Ollama and HF settings. Defines persona prompts (aligned with SBM blocks:
-left, center_left, center_right, right) and simulation defaults.
+Defines canonical, hard-coded experiment settings to avoid configuration drift.
+Persona content is sourced from data/nodes.json or data/senate_nodes.json at runtime.
 """
 
-import os
-from pathlib import Path
+# Ollama runtime (kept fixed for reproducibility).
+OLLAMA_BASE_URL = "http://localhost:11434"
+OLLAMA_MODEL = "llama3.2:3b"
 
-from dotenv import load_dotenv
+# Experiment constants (single source of truth)
+TOPIC = "Government Environmental Regulations"
+# Canonical 3-seed set for reproducible multi-run comparisons.
+SEED_LIST = [11, 23, 42]
+DEFAULT_SEED = SEED_LIST[2]
+SIMULATION_STEPS = 2
+DEFAULT_ER_EDGE_PROB = 0.15
+DEFAULT_BOT_POST_PROB = 0.80  # Probability that a bot posts in a given step (vs. remaining silent).
+BOT_INJECTION_STEP = 0
+BOT_DEPLOY_STEPS = (1, 5, 10)
+# Logging policy: compact per-step summaries only.
+DEFAULT_LOG_MODE = "summary"
+# Prompt budget controls for semantic updates (speed/stability).
+MAX_NEIGHBORS_PER_UPDATE = 6
+MAX_CHARS_PER_NEIGHBOR = 320
+# Persona blocks: party_firstname_lastname naming
+PERSONA_BLOCKS = ("democrat", "republican", "independent")
+PERSONA_BLOCK_LAYOUT = {
+    "democrat": (0, 0.20),
+    "republican": (1, 0.80),
+    "independent": (2, 0.50),
+}
+def side_from_name(name: str) -> str:
+    """Derive block from node name (party_firstname_lastname)."""
+    for block in PERSONA_BLOCKS:
+        if name.startswith(block):
+            return block
+    return "unknown"
 
-load_dotenv(Path(__file__).parent.parent / ".env")
+# Aliases used across modules
+DEFAULT_TOPIC = TOPIC
+DEFAULT_STEPS = SIMULATION_STEPS
 
-# Ollama (local LLM). No API key required.
-OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.2:3b")
-
-# Network: SBM has 20 nodes, 4 blocks × 5 nodes each
-DEFAULT_N = 20
-
-# Simulation defaults
-DEFAULT_TOPIC = "AI Regulation"
-DEFAULT_STEPS = 5
-
-# Persona prompts for each block. Used to initialize agents and steer LLM responses.
-PERSONAS = [
-    {
-        "name": "left",
-        "prompt": "You hold left-leaning views. You favor strong regulation, collective action, and skepticism of corporate power.",
-    },
-    {
-        "name": "center_left",
-        "prompt": "You are center-left. You support regulation with room for innovation, and balance market and social concerns.",
-    },
-    {
-        "name": "center_right",
-        "prompt": "You are center-right. You prefer limited regulation, trusting markets while acknowledging some need for guardrails.",
-    },
-    {
-        "name": "right",
-        "prompt": "You hold right-leaning views. You favor minimal regulation and believe free markets and voluntary action are best.",
-    },
-]
+# RGG + long-range defaults
+RGG_RADIUS = 0.30 # radius of the RGG graph for local ties
+LONG_RANGE_FRACTION = 0.30 # fraction of long range neighbors
+LONG_RANGE_K = 2 # max number of long range connection per node

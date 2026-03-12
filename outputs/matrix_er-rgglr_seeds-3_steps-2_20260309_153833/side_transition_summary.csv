@@ -1,0 +1,11 @@
+bot,metric,value
+off,step_stay_rate,0.342593
+off,initial_to_final_stay_rate,0.324074
+off,mean_step_change_rate,0.657407
+off,peak_step_change_rate,0.675926
+off,peak_step_change_rate_step,1
+on,step_stay_rate,0.382883
+on,initial_to_final_stay_rate,0.441441
+on,mean_step_change_rate,0.617117
+on,peak_step_change_rate,0.711712
+on,peak_step_change_rate_step,1

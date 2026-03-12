@@ -1,196 +1,148 @@
-# Semantic Opinion Dynamics: LLM Agents on Complex Networks
+# Government Environmental Regulation Opinion Dynamics
 
-ECE 227 Final Project — Replacing classical "weighted average" opinion dynamics with **in-context learning** as the update rule.
+This project simulates opinion dynamics on personas using **semantic** (SBERT) measurement.
+Opinions are LLM-updated text; variance is measured in SBERT embedding space.
+The focus is on the effect of different graph structures (ER vs RGGLR).
 
-## Overview
+Personas and initial opinions come from node files in `data/`. Use `--persona-set` to choose which file:
 
-Classical opinion dynamics (e.g., DeGroot) model opinions as scalars in [0, 1] and update via weighted averaging. This fails to capture semantic nuance (framing, rhetoric, logical fallacies). This project models network nodes as **generative agents** that hold text-based beliefs and update them through **conversation** with neighbors, using an LLM (Ollama, run locally).
+- `personas` (default) → `data/nodes.json`
+- `senate` → `data/senate_nodes.json`
 
-### Novelty
+## Canonical Experiment Design
 
-- **50 years of network science** assume weighted averaging for opinion updates
-- **This project** replaces that with **in-context learning**: agents read neighbor opinions and produce updated opinions via LLM inference
-
-### Example
-
-In a polarized political network, a centrist might be persuaded by the neighbor with better rhetorical arguments—not by numerical averaging.
-
----
-
-## Quick Start
-
-```bash
-# 1. Install Ollama and pull a model (see Setup below)
-brew install ollama
-brew services start ollama
-ollama pull llama3.2:3b
-
-# 2. Clone, create venv, install deps
-git clone https://github.com/mapersiani/ECE227-Final-Project.git
-cd ECE227-Final-Project
-python -m venv venv
-source venv/bin/activate          # Windows: venv\Scripts\activate
-pip install -r requirements.txt
-
-# 3. Set up .env (copy .env.example to .env; defaults work if you skip)
-cp .env.example .env   # Windows: copy .env.example .env
-
-# 4. Run the comparison (semantic + DeGroot)
-python main.py compare --steps 5 --plot
-```
-
----
+To avoid drift/inconsistency, core settings are hard-coded in [`src/config.py`](src/config.py):
+- Topic: `Government Environmental Regulations`
+- Graphs: `er`, `rgglr`
+- Node count: `36`
+- Canonical seeds: `11, 23, 42`
+- Steps: `10`
+- ER edge probability: `0.15`
+- RGGLR params: radius `0.30`, long-range fraction `0.30`, long-range k `2`
+- Bot injection step: `t=0`
+- Log mode: compact per-step summary (`summary`)
+- Prompt budget: max `6` neighbor opinions, max `320` chars per neighbor (for faster run. Can be changed)
 
 ## Setup
 
-### 1. Install Ollama (required for semantic simulation)
-
-Ollama runs LLMs locally—no API keys, no rate limits.
-
-**macOS**
 ```bash
-brew install ollama
-brew services start ollama   # starts Ollama and keeps it running
+python -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
 ```
 
-**Windows**  
-Download from [ollama.com](https://ollama.com) and run the installer. Ollama runs in the system tray.
-
-**Linux**
-```bash
-curl -fsSL https://ollama.com/install.sh | sh
-ollama serve   # or configure as a systemd service
-```
-
-### 2. Pull a model
+For semantic runs, start Ollama and ensure model `llama3.2:3b` is available:
 
 ```bash
+ollama serve
 ollama pull llama3.2:3b
 ```
 
-Alternative models: `phi3:mini`, `mistral:7b` (larger = slower but higher quality). Set in `.env` via `OLLAMA_MODEL=phi3:mini` if desired.
-
-### 3. Python environment
+## CLI
 
 ```bash
-python -m venv venv
-source venv/bin/activate   # Windows: venv\Scripts\activate
-pip install -r requirements.txt
+python main.py --help
 ```
 
-### 4. Set up .env
+Two modes are supported:
+- `run`: run one condition
+- `matrix`: run the full canonical matrix
+
+### Run One Condition
 
 ```bash
-cp .env.example .env   # macOS/Linux
-copy .env.example .env # Windows (Command Prompt)
+python main.py run --graph {er|rgglr} --bot {off|on} --persona-set {personas|senate} [--seed SEED]
 ```
 
-Defaults work without editing. Optionally:
-- `OLLAMA_MODEL` – change model (e.g. `phi3:mini`, `mistral:7b`)
-- `HF_TOKEN` – add if you have a Hugging Face account (faster model downloads)
-
-**Requirements:** Python 3.9+
-
----
-
-## Usage
-
-### Compare semantic vs DeGroot (recommended first run)
-
-Runs both and plots them together:
+Examples:
 
 ```bash
-python main.py compare --topic "AI Regulation" --steps 5 --plot
+# ER: semantic (no bot), personas
+python main.py run --graph er --bot off --persona-set personas
+
+# RGGLR: semantic with bot intervention
+python main.py run --graph rgglr --bot on --persona-set personas
+
+# Use US senators instead of personas
+python main.py run --graph er --bot off --persona-set senate
+
+# Custom seed (default 42)
+python main.py run --graph er --bot off --persona-set personas --seed 11
 ```
 
-- **DeGroot** (orange): scalar consensus—variance decreases.
-- **Semantic** (blue): LLM-based—may polarize or diverge.
+Notes:
+- `--persona-set personas` loads `data/nodes.json`; `--persona-set senate` loads `data/senate_nodes.json`.
+- A dedicated output folder is created automatically for every run.
+- `--no-log` disables per-run compact step summaries.
 
-Output: `outputs/semantic_vs_degroot.png`
-
-### Semantic only (LLM-based)
+### Run Full Canonical Matrix
 
 ```bash
-python main.py semantic --topic "AI Regulation" --steps 5 --plot
+python main.py matrix
 ```
 
-Output: variance printed to terminal, `outputs/semantic_variance.png` if `--plot`
+This executes, for each graph in `er,rgglr`, each persona set in `personas,senate`, and each seed in `11,23,42`:
+- `semantic` with bot off
+- `semantic` with bot on
 
-**Runtime:** ~5–10 min for 5 steps (20 agents × 5 steps = 100 LLM calls).
-
-### DeGroot only (fast, no LLM)
+Optional flags:
 
 ```bash
-python main.py degroot --steps 5 --plot
+python main.py matrix --show-progress --log-runs
+python main.py matrix --out outputs/my_matrix_copy.csv
 ```
 
-Runs in seconds. Output: `outputs/degroot_variance.png`
+## Outputs
 
-### Intervention study (disinformation bot)
+### `run` mode
+Each run creates a folder:
 
-```bash
-python main.py intervention --topic "AI Regulation" --steps 5 --plot
-```
+- `outputs/run_<graph>_<model>_bot-<off|on>_seed-<seed>_<timestamp>/`
 
-Adds a bot that posts frequently; measures resilience. Output: `outputs/intervention_comparison.png`
+Typical contents:
+- `network_topology.png` (graph structure view)
+- `opinion_drift_network.png` (node color = opinion drift from initial)
+- `semantic_variance.png`
+- `side_counts.png`
+- `timeseries.csv` (per-timestep metrics)
+- `run_summary.json` (config + graph metrics + final variance stats)
+- `logs/step_summary.jsonl` (semantic runs, unless `--no-log`)
+  - Contains: one metadata row, one summary row per step, one final run summary row
 
----
+### `matrix` mode
+Each matrix invocation creates a folder:
 
-## What You'll See
+- `outputs/matrix_er-rgglr_personas-senate_seeds-3_steps-10_<timestamp>/`
 
-When running semantic or compare:
+Typical contents:
+- `matrix_results.csv` (all per-timestep rows)
+- `condition_variance_trajectories.png` (mean variance trajectories by condition)
+- `final_step_variance_bars.png` (final-step means with std error bars)
+- `variance_heatmap.png` (condition x timestep variance heatmap)
+- `bot_effect_over_time.png` (semantic bot-on minus bot-off)
+- `semantic_side_entropy.png` (side-mix entropy over time)
+- `matrix_summary.json` (run metadata + final-step summary)
+- `logs/*_summary.jsonl` (optional, with `--log-runs`)
 
-1. **Startup:** `Creating network...` → `Graph: nodes=20, edges=49` → `Creating agents...` → `Running semantic simulation...`
-2. **SBERT loading** (first run): `Loading weights: 100%` and a BertModel report
-3. **Long pause** (5–10 min): no progress bar—it's working
-4. **Results:** variance per timestep printed, then `Saved outputs/...png`
+If `--out` is provided, an extra copy of `matrix_results.csv` is written there.
 
----
+The matrix CSV includes per-timestep rows with:
+- condition fields: `graph`, `persona_set`, `model`, `bot`, `seed`, `t`
+- dynamics fields: `variance`, `delta_from_t0`, `delta_from_prev`
+- semantic side counts: `democrat_count`, `republican_count`, `independent_count`
+- graph structure fields: node/edge counts, degree stats, density, components, isolates, local vs long-range edges
+- `bot_degree` for bot-on rows
 
-## Project Structure
+## Active Runtime Files
 
-```
-ECE227-Final-Project/
-├── main.py              # CLI: semantic, degroot, compare, intervention
-├── outputs/             # Plot output directory (created on first --plot)
-├── requirements.txt
-├── .env.example         # Copy to .env (cp .env.example .env)
-├── README.md
-└── src/
-    ├── config.py        # Personas (left, center_left, center_right, right), topic
-    ├── network.py       # SBM graph: 20 nodes, 4 blocks
-    ├── agent.py         # Agent with persona and opinion text
-    ├── llm_client.py    # Ollama API for opinion updates
-    ├── simulation.py    # Discrete-time semantic simulation
-    ├── measurement.py   # SBERT embeddings, semantic variance
-    └── intervention.py  # Disinformation bot study
-```
-
-## Components
-
-| Component | Description |
-|-----------|-------------|
-| **Network** | SBM: 20 nodes in 4 blocks (left, center left, center right, right) |
-| **Agents** | Personas aligned to blocks (left, center_left, center_right, right) |
-| **Simulation** | Each step: agents read neighbors' opinions → LLM generates updated opinion |
-| **Measurement** | SBERT embeddings → semantic variance (distance from centroid) |
-| **Intervention** | Bot node with high posting frequency |
-
----
-
-## Troubleshooting
-
-| Issue | Fix |
-|-------|-----|
-| `could not connect to ollama server` | Start Ollama: `ollama serve` or `brew services start ollama` |
-| `model not found` | Pull a model: `ollama pull llama3.2:3b` |
-| Different model | Copy `.env.example` to `.env`, set `OLLAMA_MODEL=phi3:mini` |
-| Import errors | Ensure venv is activated and run `pip install -r requirements.txt` |
-| Slow semantic run | Expected. Try `--steps 2` or `--steps 3` for faster runs |
-| HF_TOKEN warning | Optional. Set `HF_TOKEN` in `.env` if you have a Hugging Face account for faster model downloads; omit for anonymous use |
-
----
-
-## License
-
-MIT
+- `main.py`
+- `src/config.py`
+- `src/load_nodes.py`
+- `src/graphs/er.py`
+- `src/graphs/rgg_long_range.py`
+- `src/simulation.py`
+- `src/intervention.py`
+- `src/measurement.py`
+- `src/llm_client.py`
+- `src/agent.py`
