@@ -9,6 +9,11 @@ Personas and initial opinions come from node files in `data/`. Use `--persona-se
 - `personas` (default) → `data/nodes.json`
 - `senate` → `data/senate_nodes.json`
 
+## Documentation
+
+- [Project Architecture & Run Flow](docs/architecture.md)
+- [Matrix Run Execution Loop](docs/matrix_flow.md)
+
 ## Canonical Experiment Design
 
 To avoid drift/inconsistency, core settings are hard-coded in [`src/config.py`](src/config.py):

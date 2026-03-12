@@ -13,11 +13,12 @@ from time import perf_counter
 from typing import Callable, List, Optional
 
 import networkx as nx
+import numpy as np
 
 from src.agent import Agent
 from src.config import DEFAULT_TOPIC, MAX_CHARS_PER_NEIGHBOR, MAX_NEIGHBORS_PER_UPDATE, PERSONA_BLOCKS
 from src.llm_client import get_updated_opinion, prepare_neighbor_opinions
-from src.measurement import classify_side_labels, embed_opinions, semantic_variance
+from src.measurement import classify_side_labels, embed_opinions, semantic_variance, opinion_polarization, _get_model
 
 
 def create_agents(G: nx.Graph, topic: str = DEFAULT_TOPIC) -> List[Agent]:
@@ -97,7 +98,7 @@ def run_semantic(
     log_path: Optional[str | Path] = None,
     return_side_labels: bool = False,
     persona_set: str = "personas",
-) -> tuple[List[float], List[dict[str, int]]] | tuple[List[float], List[dict[str, int]], list[list[str]]]:
+) -> tuple[List[float], List[float], List[float], List[dict[str, int]]] | tuple[List[float], List[float], List[float], List[dict[str, int]], list[list[str]]]:
     """
     Run semantic simulation for ``steps`` steps.
 
@@ -114,8 +115,20 @@ def run_semantic(
         return counts
 
     variances: List[float] = []
+    polarizations: List[float] = []
+    drifts: List[float] = []
     side_counts: List[dict[str, int]] = []
     side_labels_over_time: list[list[str]] = []
+
+    model = _get_model(show_progress=False)
+    real_agents = [a for a in agents if not a.is_bot]
+    init_personas = [a.persona_prompt for a in real_agents]
+    init_embs = model.encode(init_personas, convert_to_numpy=True, show_progress_bar=False)
+    norms_i = np.linalg.norm(init_embs, axis=1, keepdims=True)
+    norms_i = np.where(norms_i == 0, 1e-9, norms_i)
+    init_embs_norm = init_embs / norms_i
+
+    blocks = [G.nodes[a.node_id].get("block", 0) for a in real_agents]
 
     log_fh = None
     run_t0 = perf_counter()
@@ -138,6 +151,18 @@ def run_semantic(
     opinions = [a.current_opinion for a in agents]
     emb0 = embed_opinions(opinions)
     variances.append(semantic_variance(emb0))
+    polarizations.append(opinion_polarization(emb0[:len(real_agents)], blocks))
+    
+    # Calculate drift
+    curr_personas = [a.persona_prompt for a in real_agents]
+    curr_embs = model.encode(curr_personas, convert_to_numpy=True, show_progress_bar=False)
+    norms_c = np.linalg.norm(curr_embs, axis=1, keepdims=True)
+    norms_c = np.where(norms_c == 0, 1e-9, norms_c)
+    curr_embs_norm = curr_embs / norms_c
+    cos_sim = np.sum(init_embs_norm * curr_embs_norm, axis=1)
+    persona_drift = 1.0 - np.clip(cos_sim, -1, 1)
+    drifts.append(float(np.mean(persona_drift)))
+
     labels0 = classify_side_labels(emb0, persona_set=persona_set)
     side_counts.append(_counts_from_labels(labels0))
     if return_side_labels:
@@ -152,6 +177,17 @@ def run_semantic(
         opinions = [a.current_opinion for a in agents]
         emb = embed_opinions(opinions)
         variances.append(semantic_variance(emb))
+        polarizations.append(opinion_polarization(emb[:len(real_agents)], blocks))
+
+        curr_personas = [a.persona_prompt for a in real_agents]
+        curr_embs = model.encode(curr_personas, convert_to_numpy=True, show_progress_bar=False)
+        norms_c = np.linalg.norm(curr_embs, axis=1, keepdims=True)
+        norms_c = np.where(norms_c == 0, 1e-9, norms_c)
+        curr_embs_norm = curr_embs / norms_c
+        cos_sim = np.sum(init_embs_norm * curr_embs_norm, axis=1)
+        persona_drift = 1.0 - np.clip(cos_sim, -1, 1)
+        drifts.append(float(np.mean(persona_drift)))
+        
         labels = classify_side_labels(emb, persona_set=persona_set)
         side_counts.append(_counts_from_labels(labels))
         if return_side_labels:
@@ -163,6 +199,8 @@ def run_semantic(
                 "type": "step_summary",
                 "t": t,
                 "semantic_variance": float(variances[-1]),
+                "opinion_polarization": float(polarizations[-1]),
+                "persona_drift_mean": float(drifts[-1]),
                 "side_counts": side_counts[-1],
                 "llm_updates": llm_updates,
                 "avg_neighbors_used": float(step_stats["avg_neighbors_used"]),
@@ -181,5 +219,5 @@ def run_semantic(
         log_fh.write(json.dumps(final, ensure_ascii=False) + "\n")
         log_fh.close()
     if return_side_labels:
-        return variances, side_counts, side_labels_over_time
-    return variances, side_counts
+        return variances, polarizations, drifts, side_counts, side_labels_over_time
+    return variances, polarizations, drifts, side_counts
