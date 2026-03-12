@@ -23,7 +23,7 @@ from src.config import (
     PERSONA_BLOCKS,
 )
 from src.llm_client import get_updated_opinion, prepare_neighbor_opinions
-from src.measurement import classify_side_labels, embed_opinions, semantic_variance
+from src.measurement import classify_side_labels, embed_opinions, semantic_variance, opinion_polarization, _get_model
 from src.simulation import create_agents
 
 DEFAULT_BOT_PERSONA = (
@@ -159,6 +159,15 @@ def step_semantic_with_bot(
         "bot_deployed": 1.0 if bot_deployed else 0.0,
     }
 
+    avg_neighbors_used = (total_neighbors_used / llm_updates) if llm_updates else 0.0
+    avg_neighbor_chars = (total_neighbor_chars / llm_updates) if llm_updates else 0.0
+    return {
+        "llm_updates": float(llm_updates),
+        "avg_neighbors_used": float(avg_neighbors_used),
+        "avg_neighbor_chars": float(avg_neighbor_chars),
+        "bot_amplified_updates": float(bot_amplified_updates),
+        "bot_deployed": 1.0 if bot_deployed else 0.0,
+    }
 
 def run_with_bot_on_graph(
     G: nx.Graph,
@@ -172,10 +181,10 @@ def run_with_bot_on_graph(
     return_side_labels: bool = False,
     persona_set: str = "personas",
 ) -> (
-    tuple[list[float], list[dict[str, int]]]
-    | tuple[list[float], list[dict[str, int]], list[list[str]]]
-    | tuple[list[float], list[dict[str, int]], nx.Graph, list[Agent]]
-    | tuple[list[float], list[dict[str, int]], list[list[str]], nx.Graph, list[Agent]]
+    tuple[list[float], list[float], list[float], list[dict[str, int]]]
+    | tuple[list[float], list[float], list[float], list[dict[str, int]], list[list[str]]]
+    | tuple[list[float], list[float], list[float], list[dict[str, int]], nx.Graph, list[Agent]]
+    | tuple[list[float], list[float], list[float], list[dict[str, int]], list[list[str]], nx.Graph, list[Agent]]
 ):
     """Run semantic simulation with bot on a provided graph (bot injected at t=0)."""
     agents = create_agents(G, topic=topic)
@@ -185,8 +194,20 @@ def run_with_bot_on_graph(
     from tqdm import tqdm
 
     variances: list[float] = []
+    polarizations: list[float] = []
+    drifts: list[float] = []
     side_counts: list[dict[str, int]] = []
     side_labels_over_time: list[list[str]] = []
+
+    model = _get_model(show_progress=False)
+    real_agents = [a for a in agents if not a.is_bot]
+    init_personas = [a.persona_prompt for a in real_agents]
+    init_embs = model.encode(init_personas, convert_to_numpy=True, show_progress_bar=False)
+    norms_i = np.linalg.norm(init_embs, axis=1, keepdims=True)
+    norms_i = np.where(norms_i == 0, 1e-9, norms_i)
+    init_embs_norm = init_embs / norms_i
+
+    blocks = [G.nodes[a.node_id].get("block", 0) for a in real_agents]
 
     def _counts_from_labels(labels: list[str]) -> dict[str, int]:
         counts = {side: 0 for side in PERSONA_BLOCKS}
@@ -221,6 +242,18 @@ def run_with_bot_on_graph(
     opinions = [a.current_opinion for a in agents]
     emb0 = embed_opinions(opinions)
     variances.append(semantic_variance(emb0))
+    polarizations.append(opinion_polarization(emb0[:len(real_agents)], blocks))
+    
+    # Calculate drift
+    curr_personas = [a.persona_prompt for a in real_agents]
+    curr_embs = model.encode(curr_personas, convert_to_numpy=True, show_progress_bar=False)
+    norms_c = np.linalg.norm(curr_embs, axis=1, keepdims=True)
+    norms_c = np.where(norms_c == 0, 1e-9, norms_c)
+    curr_embs_norm = curr_embs / norms_c
+    cos_sim = np.sum(init_embs_norm * curr_embs_norm, axis=1)
+    persona_drift = 1.0 - np.clip(cos_sim, -1, 1)
+    drifts.append(float(np.mean(persona_drift)))
+    
     labels0 = classify_side_labels(emb0, persona_set=persona_set)
     side_counts.append(_counts_from_labels(labels0))
     if return_side_labels:
@@ -235,6 +268,17 @@ def run_with_bot_on_graph(
         opinions = [a.current_opinion for a in agents]
         emb = embed_opinions(opinions)
         variances.append(semantic_variance(emb))
+        polarizations.append(opinion_polarization(emb[:len(real_agents)], blocks))
+        
+        curr_personas = [a.persona_prompt for a in real_agents]
+        curr_embs = model.encode(curr_personas, convert_to_numpy=True, show_progress_bar=False)
+        norms_c = np.linalg.norm(curr_embs, axis=1, keepdims=True)
+        norms_c = np.where(norms_c == 0, 1e-9, norms_c)
+        curr_embs_norm = curr_embs / norms_c
+        cos_sim = np.sum(init_embs_norm * curr_embs_norm, axis=1)
+        persona_drift = 1.0 - np.clip(cos_sim, -1, 1)
+        drifts.append(float(np.mean(persona_drift)))
+        
         labels = classify_side_labels(emb, persona_set=persona_set)
         side_counts.append(_counts_from_labels(labels))
         if return_side_labels:
@@ -248,6 +292,8 @@ def run_with_bot_on_graph(
                 "type": "step_summary",
                 "t": t,
                 "semantic_variance": float(variances[-1]),
+                "opinion_polarization": float(polarizations[-1]),
+                "persona_drift_mean": float(drifts[-1]),
                 "side_counts": side_counts[-1],
                 "llm_updates": llm_updates,
                 "avg_neighbors_used": float(step_stats["avg_neighbors_used"]),
@@ -269,8 +315,8 @@ def run_with_bot_on_graph(
         log_fh.close()
     if return_state:
         if return_side_labels:
-            return variances, side_counts, side_labels_over_time, G, agents
-        return variances, side_counts, G, agents
+            return variances, polarizations, drifts, side_counts, side_labels_over_time, G, agents
+        return variances, polarizations, drifts, side_counts, G, agents
     if return_side_labels:
-        return variances, side_counts, side_labels_over_time
-    return variances, side_counts
+        return variances, polarizations, drifts, side_counts, side_labels_over_time
+    return variances, polarizations, drifts, side_counts

@@ -196,7 +196,7 @@ def _plot_drift_network(
 
     sm = plt.cm.ScalarMappable(cmap=cmap, norm=Normalize(vmin=vmin, vmax=vmax))
     sm.set_array([])
-    fig.colorbar(sm, ax=plt.gca(), ax=ax, label="Opinion Drift (cosine Δ from initial)")
+    fig.colorbar(sm, ax=ax, label="Opinion Drift (cosine Δ from initial)")
 
     ax.set_title(title)
     ax.set_xlabel("Ideological Position")
@@ -260,6 +260,7 @@ def _build_graph(graph_key: str, seed: int, persona_set: str = "personas"):
 def _graph_structure_metrics(G) -> dict[str, float | int]:
     n_nodes = int(G.number_of_nodes())
     n_edges = int(G.number_of_edges())
+    blocks = [G.nodes[i].get("block", 0) for i in range(n_nodes)]
 
     degs = np.array([d for _, d in G.degree()], dtype=float)
     avg_degree = float(np.mean(degs)) if degs.size else 0.0
@@ -278,6 +279,53 @@ def _graph_structure_metrics(G) -> dict[str, float | int]:
         long_range_edges = 0
         local_edges = n_edges
 
+    # Structural
+    avg_clustering = nx.average_clustering(G)
+    transitivity = nx.transitivity(G)
+
+    try:
+        avg_sp = nx.average_shortest_path_length(G)
+        diameter = nx.diameter(G)
+    except nx.NetworkXError:
+        # Not connected - use largest component
+        if n_nodes > 0:
+            lcc = max(nx.connected_components(G), key=len)
+            H = G.subgraph(lcc)
+            avg_sp = nx.average_shortest_path_length(H)
+            diameter = nx.diameter(H)
+        else:
+            avg_sp = 0.0
+            diameter = 0
+
+    try:
+        deg_assort = nx.degree_assortativity_coefficient(G)
+    except Exception:
+        deg_assort = float("nan")
+
+    # Modularity using block partition
+    block_communities = {}
+    for i, b in enumerate(blocks):
+        block_communities.setdefault(b, set()).add(i)
+    communities = list(block_communities.values())
+    try:
+        modularity = nx.community.modularity(G, communities)
+    except Exception:
+        modularity = float("nan")
+
+    # Bridge edges (cut edges)
+    bridge_edges = set(nx.bridges(G))
+    bridge_fraction = len(bridge_edges) / max(G.number_of_edges(), 1)
+
+    # Centrality
+    betweenness = nx.betweenness_centrality(G, normalized=True)
+    try:
+        eigenvector = nx.eigenvector_centrality(G, max_iter=1000)
+    except nx.PowerIterationFailedConvergence:
+        eigenvector = {i: 0.0 for i in G.nodes()}
+
+    avg_betweenness = float(np.mean(list(betweenness.values()))) if betweenness else 0.0
+    avg_eigenvector = float(np.mean(list(eigenvector.values()))) if eigenvector else 0.0
+
     return {
         "nodes": n_nodes,
         "edges": n_edges,
@@ -289,12 +337,23 @@ def _graph_structure_metrics(G) -> dict[str, float | int]:
         "max_degree": max_degree,
         "local_edges": local_edges,
         "long_range_edges": long_range_edges,
+        "avg_clustering": float(avg_clustering),
+        "transitivity": float(transitivity),
+        "avg_shortest_path": float(avg_sp),
+        "diameter": int(diameter),
+        "degree_assortativity": float(deg_assort),
+        "modularity": float(modularity),
+        "bridge_edge_fraction": float(bridge_fraction),
+        "avg_betweenness": avg_betweenness,
+        "avg_eigenvector": avg_eigenvector,
     }
 
 
 def main_run(args: argparse.Namespace) -> dict[str, list[float]]:
     from src.intervention import run_with_bot_on_graph
     from src.simulation import create_agents, run_semantic
+    from src.degroot import run_degroot
+    from src.config import PERSONA_BLOCK_LAYOUT, side_from_name
 
     assert args.graph in ("er", "rgglr"), "run requires --graph {er|rgglr}"
     assert args.bot in ("off", "on"), "run requires --bot {off|on}"
@@ -317,7 +376,7 @@ def main_run(args: argparse.Namespace) -> dict[str, list[float]]:
 
     G, graph_label = _build_graph(args.graph, args.seed, persona_set=persona_set)
 
-    run_id = f"{graph_label}_{'bot' if args.bot == 'on' else 'no_bot'}"
+    run_id = f"{graph_label}_{'bot' if args.bot == "on" else "no_bot"}"
     print(f"Running {run_id} | topic={DEFAULT_TOPIC} | persona_set={persona_set}")
     print(f"Graph: nodes={G.number_of_nodes()}, edges={G.number_of_edges()}, seed={args.seed}")
     print(f"Output folder: {run_dir}")
@@ -328,13 +387,33 @@ def main_run(args: argparse.Namespace) -> dict[str, list[float]]:
         print(f"Logging compact {DEFAULT_LOG_MODE} records to {log_path}")
 
     semantic_var: list[float] | None = None
+    semantic_pol: list[float] | None = None
+    semantic_drift: list[float] | None = None
     side_counts: list[dict[str, int]] | None = None
     semantic_graph = G
     semantic_agents = None
 
+    # Run DeGroot baseline
+    print(f"\n[{run_id}] DeGroot (baseline)...")
+    n = G.number_of_nodes()
+    initial_degroot = np.zeros(n)
+    for i in range(n):
+        node_name = G.nodes[i].get("name", "")
+        side = side_from_name(node_name)
+        if side in PERSONA_BLOCK_LAYOUT:
+            initial_degroot[i] = PERSONA_BLOCK_LAYOUT[side][1]
+        else:
+            initial_degroot[i] = 0.5
+            
+    degroot_history = run_degroot(G, initial_degroot, steps=DEFAULT_STEPS)
+    degroot_var = [float(np.var(x)) for x in degroot_history]
+    print("DeGroot variance over time:")
+    for t, v in enumerate(degroot_var):
+        print(f"  t={t}: {v:.4f}")
+
     if True:  # always run semantic
         if args.bot == "on":
-            semantic_var, side_counts, semantic_graph, semantic_agents = run_with_bot_on_graph(
+            semantic_var, semantic_pol, semantic_drift, side_counts, semantic_graph, semantic_agents = run_with_bot_on_graph(
                 G=G,
                 topic=DEFAULT_TOPIC,
                 steps=DEFAULT_STEPS,
@@ -347,7 +426,7 @@ def main_run(args: argparse.Namespace) -> dict[str, list[float]]:
             )
         else:
             agents = create_agents(G, topic=DEFAULT_TOPIC)
-            semantic_var, side_counts = run_semantic(
+            semantic_var, semantic_pol, semantic_drift, side_counts = run_semantic(
                 G=G,
                 agents=agents,
                 topic=DEFAULT_TOPIC,
@@ -371,6 +450,18 @@ def main_run(args: argparse.Namespace) -> dict[str, list[float]]:
     )
     print(f"Saved {topology_path}")
 
+    if degroot_var is not None:
+        out_deg = _save_plot(run_dir, "degroot_variance.png")
+        plt.figure()
+        plt.plot(degroot_var, marker="s", color="orange")
+        plt.xlabel("Timestep")
+        plt.ylabel("DeGroot Variance")
+        plt.title(f"{run_id}: DeGroot Variance")
+        plt.grid(True)
+        plt.savefig(out_deg, dpi=160)
+        plt.close()
+        print(f"Saved {out_deg}")
+
     if semantic_var is not None:
         out = _save_plot(run_dir, "semantic_variance.png")
         plt.figure()
@@ -382,6 +473,30 @@ def main_run(args: argparse.Namespace) -> dict[str, list[float]]:
         plt.savefig(out, dpi=160)
         plt.close()
         print(f"Saved {out}")
+        
+    if semantic_pol is not None:
+        out_pol = _save_plot(run_dir, "semantic_polarization.png")
+        plt.figure()
+        plt.plot(semantic_pol, marker="o", color="purple")
+        plt.xlabel("Timestep")
+        plt.ylabel("Opinion Polarization")
+        plt.title(f"{run_id}: Opinion Polarization Over Time")
+        plt.grid(True)
+        plt.savefig(out_pol, dpi=160)
+        plt.close()
+        print(f"Saved {out_pol}")
+
+    if semantic_drift is not None:
+        out_drift = _save_plot(run_dir, "persona_drift.png")
+        plt.figure()
+        plt.plot(semantic_drift, marker="o", color="red")
+        plt.xlabel("Timestep")
+        plt.ylabel("Persona Drift Mean")
+        plt.title(f"{run_id}: Persona Drift Over Time")
+        plt.grid(True)
+        plt.savefig(out_drift, dpi=160)
+        plt.close()
+        print(f"Saved {out_drift}")
 
     if side_counts is not None:
         out2 = _save_plot(run_dir, "side_counts.png")
@@ -440,6 +555,8 @@ def main_run(args: argparse.Namespace) -> dict[str, list[float]]:
     }
     if semantic_var is not None:
         summary["semantic_final_variance"] = float(semantic_var[-1])
+    if degroot_var is not None:
+        summary["degroot_final_variance"] = float(degroot_var[-1])
 
     summary_path = run_dir / "run_summary.json"
     summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
@@ -479,6 +596,8 @@ def _append_matrix_rows(
     steps: int,
     topic: str,
     variances: list[float],
+    polarizations: list[float] | None,
+    drifts: list[float] | None,
     side_counts: Optional[list[dict[str, int]]],
     graph_metrics: dict[str, float | int],
     bot_degree: Optional[int],
@@ -508,6 +627,8 @@ def _append_matrix_rows(
             "t": t,
             "topic": topic,
             "variance": float(variance),
+            "polarization": float(polarizations[t]) if polarizations else None,
+            "persona_drift_mean": float(drifts[t]) if drifts else None,
             "delta_from_t0": float(variance) - v0,
             "delta_from_prev": None if prev is None else float(variance) - prev,
             "democrat_count": democrat,
@@ -524,6 +645,15 @@ def _append_matrix_rows(
             "graph_max_degree": graph_metrics["max_degree"],
             "graph_local_edges": graph_metrics["local_edges"],
             "graph_long_range_edges": graph_metrics["long_range_edges"],
+            "graph_avg_clustering": graph_metrics.get("avg_clustering"),
+            "graph_transitivity": graph_metrics.get("transitivity"),
+            "graph_avg_shortest_path": graph_metrics.get("avg_shortest_path"),
+            "graph_diameter": graph_metrics.get("diameter"),
+            "graph_degree_assortativity": graph_metrics.get("degree_assortativity"),
+            "graph_modularity": graph_metrics.get("modularity"),
+            "graph_bridge_edge_fraction": graph_metrics.get("bridge_edge_fraction"),
+            "graph_avg_betweenness": graph_metrics.get("avg_betweenness"),
+            "graph_avg_eigenvector": graph_metrics.get("avg_eigenvector"),
             "bot_degree": bot_degree,
         }
         rows.append(row)
@@ -546,6 +676,8 @@ def _write_matrix_csv(rows: list[dict[str, object]], out_path: Path) -> None:
         "t",
         "topic",
         "variance",
+        "polarization",
+        "persona_drift_mean",
         "delta_from_t0",
         "delta_from_prev",
         "democrat_count",
@@ -562,6 +694,15 @@ def _write_matrix_csv(rows: list[dict[str, object]], out_path: Path) -> None:
         "graph_max_degree",
         "graph_local_edges",
         "graph_long_range_edges",
+        "graph_avg_clustering",
+        "graph_transitivity",
+        "graph_avg_shortest_path",
+        "graph_diameter",
+        "graph_degree_assortativity",
+        "graph_modularity",
+        "graph_bridge_edge_fraction",
+        "graph_avg_betweenness",
+        "graph_avg_eigenvector",
         "bot_degree",
     ]
 
@@ -1048,6 +1189,8 @@ def _plot_matrix_analysis_pack(
 def main_matrix(args: argparse.Namespace) -> dict[str, object]:
     from src.intervention import add_bot, run_with_bot_on_graph
     from src.simulation import create_agents, run_semantic
+    from src.degroot import run_degroot
+    from src.config import PERSONA_BLOCK_LAYOUT, side_from_name
 
     matrix_id, matrix_dir = _make_experiment_dir(
         "matrix",
@@ -1058,6 +1201,7 @@ def main_matrix(args: argparse.Namespace) -> dict[str, object]:
     )
     rows: list[dict[str, object]] = []
     matrix_graphs = ("er", "rgglr")
+    matrix_persona_sets = ("personas", "senate")
     matrix_steps = DEFAULT_STEPS
     matrix_topic = DEFAULT_TOPIC
     matrix_bot_prob = DEFAULT_BOT_POST_PROB
@@ -1113,7 +1257,39 @@ def main_matrix(args: argparse.Namespace) -> dict[str, object]:
                 G, graph_label = _build_graph(graph_key, seed, persona_set=persona_set)
                 base_metrics = _graph_structure_metrics(G)
 
-                print(f"\n[{graph_label} {persona_set} seed={seed}] Semantic (no bot)...")
+                print(f"\n[{graph_label} {persona_set} seed={seed}] DeGroot (baseline)...")
+                n = G.number_of_nodes()
+                initial_degroot = np.zeros(n)
+                for i in range(n):
+                    node_name = G.nodes[i].get("name", "")
+                    side = side_from_name(node_name)
+                    if side in PERSONA_BLOCK_LAYOUT:
+                        initial_degroot[i] = PERSONA_BLOCK_LAYOUT[side][1]
+                    else:
+                        initial_degroot[i] = 0.5
+                
+                degroot_history = run_degroot(G, initial_degroot, steps=matrix_steps)
+                degroot_var = [float(np.var(x)) for x in degroot_history]
+                
+                _append_matrix_rows(
+                    rows,
+                    matrix_id=matrix_id,
+                    graph=graph_key,
+                    persona_set=persona_set,
+                    model="degroot",
+                    bot="off",
+                    seed=seed,
+                    steps=matrix_steps,
+                    topic=matrix_topic,
+                    variances=degroot_var,
+                    polarizations=None,
+                    drifts=None,
+                    side_counts=None,
+                    graph_metrics=base_metrics,
+                    bot_degree=None,
+                )
+
+                print(f"[{graph_label} {persona_set} seed={seed}] Semantic (no bot)...")
                 semantic_log_path = _matrix_log_path(
                     matrix_dir,
                     graph_key,
@@ -1124,7 +1300,7 @@ def main_matrix(args: argparse.Namespace) -> dict[str, object]:
                     enabled=args.log_runs,
                 )
                 agents = create_agents(G, topic=matrix_topic)
-                semantic_var, semantic_counts, semantic_labels = run_semantic(
+                semantic_var, semantic_pol, semantic_drift, semantic_counts, semantic_labels = run_semantic(
                     G=G,
                     agents=agents,
                     topic=matrix_topic,
@@ -1152,6 +1328,8 @@ def main_matrix(args: argparse.Namespace) -> dict[str, object]:
                     steps=matrix_steps,
                     topic=matrix_topic,
                     variances=semantic_var,
+                    polarizations=semantic_pol,
+                    drifts=semantic_drift,
                     side_counts=semantic_counts,
                     graph_metrics=base_metrics,
                     bot_degree=None,
@@ -1172,7 +1350,7 @@ def main_matrix(args: argparse.Namespace) -> dict[str, object]:
                     seed=seed,
                     enabled=args.log_runs,
                 )
-                semantic_bot_var, semantic_bot_counts, semantic_bot_labels = run_with_bot_on_graph(
+                semantic_bot_var, semantic_bot_pol, semantic_bot_drift, semantic_bot_counts, semantic_bot_labels = run_with_bot_on_graph(
                     G=G,
                     topic=matrix_topic,
                     steps=matrix_steps,
@@ -1201,6 +1379,8 @@ def main_matrix(args: argparse.Namespace) -> dict[str, object]:
                     steps=matrix_steps,
                     topic=matrix_topic,
                     variances=semantic_bot_var,
+                    polarizations=semantic_bot_pol,
+                    drifts=semantic_bot_drift,
                     side_counts=semantic_bot_counts,
                     graph_metrics=bot_metrics,
                     bot_degree=bot_degree,

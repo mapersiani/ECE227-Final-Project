@@ -74,6 +74,38 @@ def semantic_variance(embeddings: np.ndarray) -> float:
     return float(np.mean(np.sum((embeddings - centroid) ** 2, axis=1)))
 
 
+def pairwise_cosine_distances(embeddings: np.ndarray) -> np.ndarray:
+    """Return (N, N) cosine distance matrix."""
+    norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
+    norms = np.where(norms == 0, 1e-9, norms)
+    normed = embeddings / norms
+    cos_sim = normed @ normed.T
+    return 1.0 - np.clip(cos_sim, -1, 1)
+
+
+def opinion_polarization(embeddings: np.ndarray, blocks: list[int]) -> float:
+    """
+    Between-block vs within-block semantic distance ratio.
+    >1 means opinions are more different across ideological blocks than within them.
+    """
+    blocks_arr = np.array(blocks)
+    unique = np.unique(blocks_arr)
+    dist = pairwise_cosine_distances(embeddings)
+
+    within, between = [], []
+    n = len(blocks_arr)
+    for i in range(n):
+        for j in range(i + 1, n):
+            if blocks_arr[i] == blocks_arr[j]:
+                within.append(dist[i, j])
+            else:
+                between.append(dist[i, j])
+
+    w = float(np.mean(within)) if within else 0.0
+    b = float(np.mean(between)) if between else 0.0
+    return b / (w + 1e-9)
+
+
 def _side_from_name(name: str) -> str:
     s = side_from_name(name)
     return s if s in PERSONA_BLOCKS else "other"
