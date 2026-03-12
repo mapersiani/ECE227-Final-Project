@@ -1,44 +1,13 @@
 """
 Network topology and DeGroot consensus.
 
-Builds an SBM (Stochastic Block Model) graph with 20 nodes in 4 blocks (left, center left,
-center right, right). Edges follow homophily: same-block nodes connect more, adjacent blocks
-less, opposite ends rarely. Also provides DeGroot consensus for scalar opinions.
+Provides ER/small-world/scale-free graph builders and DeGroot consensus.
 """
 
 from typing import Optional
 
 import networkx as nx
 import numpy as np
-
-# Block order: left (0), center left (1), center right (2), right (3)
-SBM_BLOCKS = ("left", "center_left", "center_right", "right")
-SBM_SIZES = [5, 5, 5, 5]  # 20 nodes total
-SBM_PROBS = [
-    [0.5, 0.25, 0.05, 0.01],
-    [0.25, 0.5, 0.25, 0.05],
-    [0.05, 0.25, 0.5, 0.25],
-    [0.01, 0.05, 0.25, 0.5],
-]
-
-
-def create_graph(seed: Optional[int] = None) -> nx.Graph:
-    """
-    Create SBM graph with 20 nodes in 4 blocks.
-
-    Returns:
-        NetworkX Graph. Each node has a 'block' attribute (0=left … 3=right).
-    """
-    G = nx.stochastic_block_model(SBM_SIZES, SBM_PROBS, seed=seed)
-    block_map = {}
-    for b, size in enumerate(SBM_SIZES):
-        start = sum(SBM_SIZES[:b])
-        for i in range(size):
-            block_map[start + i] = b
-    nx.set_node_attributes(G, block_map, "block")
-    return G
-
-
 def create_erdos_renyi_graph(n: int, p: float = 0.2, seed: Optional[int] = None) -> nx.Graph:
     """
     Create an Erdos-Renyi G(n, p) graph.
@@ -46,15 +15,43 @@ def create_erdos_renyi_graph(n: int, p: float = 0.2, seed: Optional[int] = None)
     return nx.erdos_renyi_graph(n=n, p=p, seed=seed)
 
 
-def create_random_geometric_graph(
+def create_small_world_rgg_graph(
     n: int,
     radius: float = 0.35,
+    long_edge_prob: float = 0.03,
     seed: Optional[int] = None,
 ) -> nx.Graph:
     """
-    Create a 2D random geometric graph with connection radius.
+    Small-world graph built from RGG + random long-distance edges.
+
+    1) Start from random geometric graph G_rgg(n, radius).
+    2) Add random edges between currently non-adjacent pairs with distance > radius
+       using probability long_edge_prob.
     """
-    return nx.random_geometric_graph(n=n, radius=radius, seed=seed)
+    rng = np.random.default_rng(seed)
+    G = nx.random_geometric_graph(n=n, radius=radius, seed=seed)
+    pos = nx.get_node_attributes(G, "pos")
+    nodes = list(G.nodes())
+    for idx, u in enumerate(nodes):
+        pu = pos[u]
+        for v in nodes[idx + 1 :]:
+            if G.has_edge(u, v):
+                continue
+            pv = pos[v]
+            dist = float(np.linalg.norm(np.array(pu) - np.array(pv)))
+            if dist <= radius:
+                continue
+            if rng.random() < long_edge_prob:
+                G.add_edge(u, v)
+    return G
+
+
+def create_scale_free_graph(n: int, m: int = 2, seed: Optional[int] = None) -> nx.Graph:
+    """
+    Scale-free graph via Barabasi-Albert preferential attachment.
+    """
+    m_eff = max(1, min(m, n - 1))
+    return nx.barabasi_albert_graph(n=n, m=m_eff, seed=seed)
 
 
 def degroot_weights(G: nx.Graph) -> np.ndarray:

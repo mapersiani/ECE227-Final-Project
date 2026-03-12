@@ -21,7 +21,7 @@ def _ollama_generate(prompt: str) -> str:
     body = json.dumps({"model": OLLAMA_MODEL, "prompt": prompt, "stream": False}).encode("utf-8")
     req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"}, method="POST")
     try:
-        with urllib.request.urlopen(req, timeout=120) as resp:
+        with urllib.request.urlopen(req, timeout=300) as resp:
             data = json.loads(resp.read().decode())
     except urllib.error.URLError as e:
         if "Connection refused" in str(e) or "localhost" in str(e).lower():

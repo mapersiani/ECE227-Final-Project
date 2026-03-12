@@ -11,34 +11,50 @@ import networkx as nx
 import numpy as np
 
 from src.agent import Agent
-from src.config import DEFAULT_TOPIC, PERSONAS
+from src.config import DEFAULT_TOPIC
 from src.llm_client import get_updated_opinion
 from src.measurement import embed_opinions, semantic_variance
 
 
 def _initial_opinion_for_persona(persona_name: str, topic: str) -> str:
     """Templated initial opinion for persona. Could be replaced with one-shot LLM call."""
-    templates = {
-        "left": f"On {topic}, I support strong regulation to protect the public and curb corporate overreach.",
-        "center_left": f"On {topic}, I favor regulation that enables innovation while safeguarding society.",
-        "center_right": f"On {topic}, I prefer light-touch regulation that lets markets lead with targeted oversight.",
-        "right": f"On {topic}, I oppose heavy regulation; voluntary standards and markets are sufficient.",
-    }
-    return templates.get(persona_name, f"I have mixed feelings about {topic}.")
+    if persona_name == "republican":
+        return (
+            f"On {topic}, I prefer limited federal intervention and market-led solutions, "
+            "with only targeted regulation."
+        )
+    return (
+        f"On {topic}, I support stronger public-interest regulation to protect health, "
+        "environment, and long-term social welfare."
+    )
 
 
 def create_agents(G: nx.Graph, topic: str = DEFAULT_TOPIC, seed: Optional[int] = None) -> List[Agent]:
     """
-    Create one agent per node. Persona comes from node block (0=left … 3=right).
+    Create one agent per node for legacy non-nodes.json modes.
+    Uses a simple two-camp mapping from graph block to persona.
     """
+    _ = seed
     agents = []
     n = G.number_of_nodes()
     blocks = nx.get_node_attributes(G, "block")
     for i in range(n):
         block = blocks.get(i, 0)
-        p = PERSONAS[min(block, len(PERSONAS) - 1)]
-        initial = _initial_opinion_for_persona(p["name"], topic)
-        agents.append(Agent(node_id=i, persona_prompt=p["prompt"], initial_opinion=initial))
+        # Legacy 4-block SBM maps to two camps:
+        # left/center-left -> democracy, center-right/right -> republican.
+        camp = "democracy" if int(block) < 2 else "republican"
+        if camp == "republican":
+            prompt = (
+                "You are a policy participant with conservative views who values "
+                "economic growth, state autonomy, and practical constraints."
+            )
+        else:
+            prompt = (
+                "You are a policy participant with progressive views who values "
+                "public safeguards, equity, and long-term collective outcomes."
+            )
+        initial = _initial_opinion_for_persona(camp, topic)
+        agents.append(Agent(node_id=i, persona_prompt=prompt, initial_opinion=initial))
     return agents
 
 
@@ -78,11 +94,13 @@ def step_semantic(G: nx.Graph, agents: List[Agent], topic: str, memory: str = ""
         neighbor_opinions = [opinions[j] for j in neighbors]
         if not neighbor_opinions:
             continue
+        # Node-level memory defaults to the node's previous opinion.
+        node_memory = memory if memory else opinions[i]
         new = get_updated_opinion(
             persona=agents[i].persona_prompt,
             topic=topic,
             neighbor_opinions=neighbor_opinions,
-            memory=memory,
+            memory=node_memory,
         )
         agents[i].update_opinion(new)
 
