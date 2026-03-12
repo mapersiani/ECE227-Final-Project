@@ -159,6 +159,15 @@ def step_semantic_with_bot(
         "bot_deployed": 1.0 if bot_deployed else 0.0,
     }
 
+    avg_neighbors_used = (total_neighbors_used / llm_updates) if llm_updates else 0.0
+    avg_neighbor_chars = (total_neighbor_chars / llm_updates) if llm_updates else 0.0
+    return {
+        "llm_updates": float(llm_updates),
+        "avg_neighbors_used": float(avg_neighbors_used),
+        "avg_neighbor_chars": float(avg_neighbor_chars),
+        "bot_amplified_updates": float(bot_amplified_updates),
+        "bot_deployed": 1.0 if bot_deployed else 0.0,
+    }
 
 def run_with_bot_on_graph(
     G: nx.Graph,

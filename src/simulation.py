@@ -13,7 +13,6 @@ from time import perf_counter
 from typing import Callable, List, Optional
 
 import networkx as nx
-import numpy as np
 
 from src.agent import Agent
 from src.config import DEFAULT_TOPIC, MAX_CHARS_PER_NEIGHBOR, MAX_NEIGHBORS_PER_UPDATE, PERSONA_BLOCKS
