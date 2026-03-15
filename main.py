@@ -33,6 +33,9 @@ from src.config import (
     DEFAULT_SEED,
     DEFAULT_ER_EDGE_PROB,
     DEFAULT_BOT_POST_PROB,
+    DEFAULT_BOT_POST_MULTIPLIER,
+    DEFAULT_BOT_TARGET_FRAC,
+    DEFAULT_BOT_CONNECT_PROB,
     RGG_RADIUS,
     LONG_RANGE_FRACTION,
     SEED_LIST,
@@ -988,11 +991,16 @@ def main():
     )
     p_swsf.add_argument("--sf-m", type=int, default=2, help="Barabasi-Albert attachment parameter m")
     p_swsf.add_argument("--bot-prob", type=float, default=DEFAULT_BOT_POST_PROB, help="Bot posting probability")
-    p_swsf.add_argument("--bot-mult", type=int, default=4, help="Bot repetition factor when posting")
+    p_swsf.add_argument(
+        "--bot-mult",
+        type=int,
+        default=DEFAULT_BOT_POST_MULTIPLIER,
+        help="Bot repetition factor when posting",
+    )
     p_swsf.add_argument(
         "--bot-connect-prob",
         type=float,
-        default=0.25,
+        default=DEFAULT_BOT_CONNECT_PROB,
         help="Probability a node is connected to bot",
     )
     p_swsf.add_argument("--plot", action="store_true")
@@ -1011,11 +1019,16 @@ def main():
     p_hub_ms.add_argument("--steps", type=int, default=DEFAULT_STEPS)
     p_hub_ms.add_argument("--sf-m", type=int, default=2, help="BA attachment parameter for scale-free topology")
     p_hub_ms.add_argument("--bot-prob", type=float, default=DEFAULT_BOT_POST_PROB, help="Bot posting probability")
-    p_hub_ms.add_argument("--bot-mult", type=int, default=4, help="Bot repetition factor when posting")
+    p_hub_ms.add_argument(
+        "--bot-mult",
+        type=int,
+        default=DEFAULT_BOT_POST_MULTIPLIER,
+        help="Bot repetition factor when posting",
+    )
     p_hub_ms.add_argument(
         "--bot-target-frac",
         type=float,
-        default=0.25,
+        default=DEFAULT_BOT_TARGET_FRAC,
         help="Fraction of nodes directly connected to bot in each case",
     )
     p_hub_ms.add_argument(

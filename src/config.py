@@ -14,9 +14,12 @@ TOPIC = "Government Environmental Regulations"
 # Canonical seed set for reproducible runs.
 SEED_LIST = [42]
 DEFAULT_SEED = SEED_LIST[-1]
-SIMULATION_STEPS = 5
+SIMULATION_STEPS = 15
 DEFAULT_ER_EDGE_PROB = 0.15
 DEFAULT_BOT_POST_PROB = 0.80  # Probability that a bot posts in a given step.
+DEFAULT_BOT_POST_MULTIPLIER = 6  # Bot repetition factor when posting.
+DEFAULT_BOT_TARGET_FRAC = 0.35  # Fraction of nodes directly connected to bot.
+DEFAULT_BOT_CONNECT_PROB = 0.25  # Probability a node is connected to bot.
 BOT_INJECTION_STEP = 0
 BOT_DEPLOY_STEPS = (1, 5, 10)
 # Logging policy: compact per-step summaries only.
