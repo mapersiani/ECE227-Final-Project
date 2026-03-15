@@ -13,10 +13,11 @@ from time import perf_counter
 from typing import Callable, List, Optional
 
 import networkx as nx
+import numpy as np
 
 from src.agent import Agent
 from src.config import DEFAULT_TOPIC, MAX_CHARS_PER_NEIGHBOR, MAX_NEIGHBORS_PER_UPDATE, PERSONA_BLOCKS
-from src.llm_client import get_updated_opinion, prepare_neighbor_opinions
+from src.llm_client import get_updated_opinion, prepare_neighbor_opinions, get_vote
 from src.measurement import classify_side_labels, embed_opinions, semantic_variance, opinion_polarization, _get_model
 
 
@@ -97,7 +98,10 @@ def run_semantic(
     log_path: Optional[str | Path] = None,
     return_side_labels: bool = False,
     persona_set: str = "personas",
-) -> tuple[List[float], List[float], List[float], List[dict[str, int]]] | tuple[List[float], List[float], List[float], List[dict[str, int]], list[list[str]]]:
+) -> (
+    tuple[list[float], list[float], list[float], list[dict[str, int]], dict[str, int], dict[str, int]]
+    | tuple[list[float], list[float], list[float], list[dict[str, int]], list[list[str]], dict[str, int], dict[str, int]]
+):
     """
     Run semantic simulation for ``steps`` steps.
 
@@ -112,6 +116,17 @@ def run_semantic(
             if side in counts:
                 counts[side] += 1
         return counts
+
+    def _collect_votes(agent_list: list[Agent], desc_str: str) -> dict[str, int]:
+        votes = {"SUPPORT": 0, "AGAINST": 0, "ABSTAIN": 0}
+        agent_iter = tqdm(agent_list, desc=desc_str, unit="agent") if show_progress else agent_list
+        for a in agent_iter:
+            ans = get_vote(a.persona_prompt, topic, a.current_opinion)
+            if ans in votes:
+                votes[ans] += 1
+            else:
+                votes["ABSTAIN"] += 1
+        return votes
 
     variances: List[float] = []
     polarizations: List[float] = []
@@ -167,6 +182,8 @@ def run_semantic(
     if return_side_labels:
         side_labels_over_time.append(labels0)
 
+    initial_votes = _collect_votes(real_agents, "Voting (Initial)")
+
     step_range = range(1, steps + 1)
     if show_progress:
         step_range = tqdm(step_range, desc="Simulation", unit="step")
@@ -209,14 +226,18 @@ def run_semantic(
             log_fh.write(json.dumps(record, ensure_ascii=False) + "\n")
         if on_step:
             on_step(t, agents)
+    final_votes = _collect_votes(real_agents, "Voting (Final)")
+
     if log_fh is not None:
         final = {
             "type": "run_summary",
             "total_llm_updates": int(total_llm_updates),
             "total_elapsed_sec": round(perf_counter() - run_t0, 4),
+            "initial_votes": initial_votes,
+            "final_votes": final_votes,
         }
         log_fh.write(json.dumps(final, ensure_ascii=False) + "\n")
         log_fh.close()
     if return_side_labels:
-        return variances, polarizations, drifts, side_counts, side_labels_over_time
-    return variances, polarizations, drifts, side_counts
+        return variances, polarizations, drifts, side_counts, side_labels_over_time, initial_votes, final_votes
+    return variances, polarizations, drifts, side_counts, initial_votes, final_votes

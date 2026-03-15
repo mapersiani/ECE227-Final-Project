@@ -104,3 +104,39 @@ You have just read the following opinions from your neighbors:
 {memory_line}
 In 1-2 concise sentences, state your updated opinion on this topic. Reflect how you are influenced by your neighbors' arguments (or lack thereof), but stay in character. Output only the opinion text, no meta-commentary."""
     return _ollama_generate(prompt)
+
+
+def get_vote(
+    persona: str,
+    topic: str,
+    opinion: str,
+) -> str:
+    """
+    Ask the LLM to categorize its stance based on its persona and current opinion.
+    Returns: 'SUPPORT', 'AGAINST', or 'ABSTAIN'
+    """
+    prompt = f"""You are simulating an agent in a social network opinion dynamics experiment.
+    
+{persona}
+
+The topic under discussion is: {topic}
+
+Your current opinion is: {opinion}
+
+Based on your persona and current opinion, cast a vote on whether you SUPPORT or are AGAINST the topic.
+If your persona generally opposes environmental regulations and favors fossil fuels, you should vote SUPPORT (since the bill cuts EPA funding and promotes oil/gas).
+If your persona generally supports environmental regulations and opposes fossil fuels, you should vote AGAINST (since the bill cuts EPA funding and promotes oil/gas).
+
+You must output exactly one of the following three words, and absolutely nothing else:
+SUPPORT
+AGAINST
+ABSTAIN"""
+    
+    response = _ollama_generate(prompt).strip().upper()
+    if "SUPPORT" in response:
+        return "SUPPORT"
+    elif "AGAINST" in response:
+        return "AGAINST"
+    else:
+        # Default to neutral or abstain if parsing goes weird
+        return "ABSTAIN"

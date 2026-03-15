@@ -1,4 +1,0 @@
-{"type": "meta", "topic": "Government Environmental Regulations", "steps": 2, "nodes": 37, "edges": 97, "bot_post_prob": 0.8, "bot_injection_step": 0, "log_schema": "summary_v1", "max_neighbors_per_update": 6, "max_chars_per_neighbor": 320}
-{"type": "step_summary", "t": 1, "semantic_variance": 0.38350826501846313, "side_counts": {"left": 5, "center_left": 12, "center_right": 17, "right": 3}, "llm_updates": 35, "avg_neighbors_used": 4.771428571428571, "avg_neighbor_chars": 1199.2285714285715, "bot_amplified_updates": 5, "step_elapsed_sec": 359.8321}
-{"type": "step_summary", "t": 2, "semantic_variance": 0.3504382073879242, "side_counts": {"left": 5, "center_left": 9, "center_right": 23, "right": 0}, "llm_updates": 35, "avg_neighbors_used": 4.8, "avg_neighbor_chars": 1531.1714285714286, "bot_amplified_updates": 7, "step_elapsed_sec": 382.2512}
-{"type": "run_summary", "total_llm_updates": 70, "total_bot_amplified_updates": 12, "total_elapsed_sec": 744.7003}

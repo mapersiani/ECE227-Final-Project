@@ -10,11 +10,11 @@ OLLAMA_BASE_URL = "http://localhost:11434"
 OLLAMA_MODEL = "llama3.2:3b"
 
 # Experiment constants (single source of truth)
-TOPIC = "Government Environmental Regulations"
+TOPIC = "H.R.6938 - Appropriations Act, 2026. This bill cuts the EPA's budget by 4%, restricts the EPA from enforcing the 2015 Ozone Air Quality Standards, and expedites offshore oil and gas production to support an 'energy dominance agenda'."
 # Canonical 3-seed set for reproducible multi-run comparisons.
-SEED_LIST = [11, 23, 42]
-DEFAULT_SEED = SEED_LIST[2]
-SIMULATION_STEPS = 2
+SEED_LIST = [11]
+DEFAULT_SEED = SEED_LIST[0]
+SIMULATION_STEPS = 10
 DEFAULT_ER_EDGE_PROB = 0.15
 DEFAULT_BOT_POST_PROB = 0.80  # Probability that a bot posts in a given step (vs. remaining silent).
 BOT_INJECTION_STEP = 0

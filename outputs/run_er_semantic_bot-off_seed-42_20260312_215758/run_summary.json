@@ -1,0 +1,55 @@
+{
+  "run_id": "ER_no_bot",
+  "timestamp": "20260312_215758",
+  "output_dir": "/Users/matteop/Documents/GitHub/ECE227-Final-Project/outputs/run_er_semantic_bot-off_seed-42_20260312_215758",
+  "graph": "er",
+  "graph_label": "ER",
+  "model": "semantic",
+  "bot": "off",
+  "seed": 42,
+  "topic": "Government Environmental Regulations",
+  "steps": 2,
+  "config": {
+    "edge_prob": 0.15,
+    "bot_post_prob": 0.8,
+    "rgg_radius": 0.3,
+    "rgg_long_range_fraction": 0.3,
+    "rgg_long_range_k": 2,
+    "log_mode": "summary",
+    "max_neighbors_per_update": 6,
+    "max_chars_per_neighbor": 320
+  },
+  "graph_metrics": {
+    "nodes": 36,
+    "edges": 90,
+    "density": 0.14285714285714285,
+    "components": 2,
+    "isolates": 1,
+    "avg_degree": 5.0,
+    "min_degree": 0,
+    "max_degree": 10,
+    "local_edges": 90,
+    "long_range_edges": 0,
+    "avg_clustering": 0.1873015873015873,
+    "transitivity": 0.15681818181818183,
+    "avg_shortest_path": 2.2638655462184873,
+    "diameter": 4,
+    "degree_assortativity": -0.25176542830826165,
+    "modularity": 0.0,
+    "bridge_edge_fraction": 0.0,
+    "avg_betweenness": 0.03510737628384688,
+    "avg_eigenvector": 0.15446976657342631
+  },
+  "semantic_final_variance": 0.35874849557876587,
+  "initial_votes": {
+    "SUPPORT": 32,
+    "AGAINST": 4,
+    "ABSTAIN": 0
+  },
+  "final_votes": {
+    "SUPPORT": 35,
+    "AGAINST": 1,
+    "ABSTAIN": 0
+  },
+  "degroot_final_variance": 0.005826604106464493
+}

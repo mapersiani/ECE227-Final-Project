@@ -239,6 +239,37 @@ def _write_run_timeseries_csv(
                 }
             )
 
+
+def _plot_vote_comparison(
+    initial_votes: dict[str, int],
+    final_votes: dict[str, int],
+    out_path: Path,
+    title: str,
+) -> None:
+    labels = ["SUPPORT", "AGAINST", "ABSTAIN"]
+    init_counts = [initial_votes.get(l, 0) for l in labels]
+    final_counts = [final_votes.get(l, 0) for l in labels]
+    
+    x = np.arange(len(labels))
+    width = 0.35
+    
+    fig, ax = plt.subplots(figsize=(8, 6))
+    rects1 = ax.bar(x - width/2, init_counts, width, label='Initial Vote', color='#60a5fa')
+    rects2 = ax.bar(x + width/2, final_counts, width, label='Final Vote', color='#f472b6')
+    
+    ax.set_ylabel('Number of Nodes')
+    ax.set_title(title)
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels)
+    ax.legend()
+    
+    ax.bar_label(rects1, padding=3)
+    ax.bar_label(rects2, padding=3)
+    
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=150)
+    plt.close()
+
 def _build_graph(graph_key: str, seed: int, persona_set: str = "personas"):
     from src.graphs.er import create_er_graph
     from src.graphs.rgg_long_range import RGGLongRangeParams, create_rgg_long_range_graph
@@ -413,7 +444,7 @@ def main_run(args: argparse.Namespace) -> dict[str, list[float]]:
 
     if True:  # always run semantic
         if args.bot == "on":
-            semantic_var, semantic_pol, semantic_drift, side_counts, semantic_graph, semantic_agents = run_with_bot_on_graph(
+            semantic_var, semantic_pol, semantic_drift, side_counts, initial_votes, final_votes, semantic_graph, semantic_agents = run_with_bot_on_graph(
                 G=G,
                 topic=DEFAULT_TOPIC,
                 steps=DEFAULT_STEPS,
@@ -426,7 +457,7 @@ def main_run(args: argparse.Namespace) -> dict[str, list[float]]:
             )
         else:
             agents = create_agents(G, topic=DEFAULT_TOPIC)
-            semantic_var, semantic_pol, semantic_drift, side_counts = run_semantic(
+            semantic_var, semantic_pol, semantic_drift, side_counts, initial_votes, final_votes = run_semantic(
                 G=G,
                 agents=agents,
                 topic=DEFAULT_TOPIC,
@@ -530,6 +561,16 @@ def main_run(args: argparse.Namespace) -> dict[str, list[float]]:
     _write_run_timeseries_csv(timeseries_path, semantic_var, side_counts)
     print(f"Saved {timeseries_path}")
 
+    if semantic_agents is not None and initial_votes is not None and final_votes is not None:
+        vote_plot_path = run_dir / "vote_comparison.png"
+        _plot_vote_comparison(
+            initial_votes,
+            final_votes,
+            vote_plot_path,
+            title=f"{run_id}: Initial vs Final Votes",
+        )
+        print(f"Saved {vote_plot_path}")
+
     summary = {
         "run_id": run_id,
         "timestamp": run_stamp,
@@ -555,6 +596,8 @@ def main_run(args: argparse.Namespace) -> dict[str, list[float]]:
     }
     if semantic_var is not None:
         summary["semantic_final_variance"] = float(semantic_var[-1])
+        summary["initial_votes"] = initial_votes
+        summary["final_votes"] = final_votes
     if degroot_var is not None:
         summary["degroot_final_variance"] = float(degroot_var[-1])
 
@@ -599,6 +642,8 @@ def _append_matrix_rows(
     polarizations: list[float] | None,
     drifts: list[float] | None,
     side_counts: Optional[list[dict[str, int]]],
+    initial_votes: dict[str, int] | None,
+    final_votes: dict[str, int] | None,
     graph_metrics: dict[str, float | int],
     bot_degree: Optional[int],
 ) -> None:
@@ -616,6 +661,12 @@ def _append_matrix_rows(
         republican = counts.get("republican", 0) if counts else None
         independent = counts.get("independent", 0) if counts else None
         measured_agents = (democrat + republican + independent) if counts else None
+
+        votes_dict = None
+        if t == 0 and initial_votes is not None:
+            votes_dict = initial_votes
+        elif t == steps and final_votes is not None:
+            votes_dict = final_votes
 
         row = {
             "matrix_id": matrix_id,
@@ -635,6 +686,9 @@ def _append_matrix_rows(
             "republican_count": republican,
             "independent_count": independent,
             "measured_agents": measured_agents,
+            "vote_support_count": votes_dict.get("SUPPORT", 0) if votes_dict else None,
+            "vote_against_count": votes_dict.get("AGAINST", 0) if votes_dict else None,
+            "vote_abstain_count": votes_dict.get("ABSTAIN", 0) if votes_dict else None,
             "graph_nodes": graph_metrics["nodes"],
             "graph_edges": graph_metrics["edges"],
             "graph_density": graph_metrics["density"],
@@ -684,6 +738,9 @@ def _write_matrix_csv(rows: list[dict[str, object]], out_path: Path) -> None:
         "republican_count",
         "independent_count",
         "measured_agents",
+        "vote_support_count",
+        "vote_against_count",
+        "vote_abstain_count",
         "graph_nodes",
         "graph_edges",
         "graph_density",
@@ -1285,6 +1342,8 @@ def main_matrix(args: argparse.Namespace) -> dict[str, object]:
                     polarizations=None,
                     drifts=None,
                     side_counts=None,
+                    initial_votes=None,
+                    final_votes=None,
                     graph_metrics=base_metrics,
                     bot_degree=None,
                 )
@@ -1300,7 +1359,7 @@ def main_matrix(args: argparse.Namespace) -> dict[str, object]:
                     enabled=args.log_runs,
                 )
                 agents = create_agents(G, topic=matrix_topic)
-                semantic_var, semantic_pol, semantic_drift, semantic_counts, semantic_labels = run_semantic(
+                semantic_var, semantic_pol, semantic_drift, semantic_counts, semantic_labels, initial_votes, final_votes = run_semantic(
                     G=G,
                     agents=agents,
                     topic=matrix_topic,
@@ -1331,8 +1390,19 @@ def main_matrix(args: argparse.Namespace) -> dict[str, object]:
                     polarizations=semantic_pol,
                     drifts=semantic_drift,
                     side_counts=semantic_counts,
+                    initial_votes=initial_votes,
+                    final_votes=final_votes,
                     graph_metrics=base_metrics,
                     bot_degree=None,
+                )
+                
+                drift_path_off = matrix_dir / f"opinion_drift_network_{graph_key}_{persona_set}_seed-{seed}_bot-off.png"
+                _plot_drift_network(
+                    G,
+                    agents,
+                    drift_path_off,
+                    title=f"Drift: {graph_label} | {persona_set} (seed={seed}) | Bot: off",
+                    seed=seed,
                 )
 
                 print(f"[{graph_label} {persona_set} seed={seed}] Semantic (+ bot)...")
@@ -1350,7 +1420,7 @@ def main_matrix(args: argparse.Namespace) -> dict[str, object]:
                     seed=seed,
                     enabled=args.log_runs,
                 )
-                semantic_bot_var, semantic_bot_pol, semantic_bot_drift, semantic_bot_counts, semantic_bot_labels = run_with_bot_on_graph(
+                semantic_bot_var, semantic_bot_pol, semantic_bot_drift, semantic_bot_counts, semantic_bot_labels, initial_votes_bot, final_votes_bot, G_bot_ret, bot_agents_ret = run_with_bot_on_graph(
                     G=G,
                     topic=matrix_topic,
                     steps=matrix_steps,
@@ -1359,6 +1429,7 @@ def main_matrix(args: argparse.Namespace) -> dict[str, object]:
                     log_path=bot_log_path,
                     show_progress=args.show_progress,
                     return_side_labels=True,
+                    return_state=True,
                     persona_set=persona_set,
                 )
                 _accumulate_side_transitions(semantic_bot_labels, transitions_by_persona_by_bot[persona_set]["on"])
@@ -1382,8 +1453,19 @@ def main_matrix(args: argparse.Namespace) -> dict[str, object]:
                     polarizations=semantic_bot_pol,
                     drifts=semantic_bot_drift,
                     side_counts=semantic_bot_counts,
+                    initial_votes=initial_votes_bot,
+                    final_votes=final_votes_bot,
                     graph_metrics=bot_metrics,
                     bot_degree=bot_degree,
+                )
+
+                drift_path_on = matrix_dir / f"opinion_drift_network_{graph_key}_{persona_set}_seed-{seed}_bot-on.png"
+                _plot_drift_network(
+                    G_bot_ret,
+                    bot_agents_ret,
+                    drift_path_on,
+                    title=f"Drift: {graph_label} | {persona_set} (seed={seed}) | Bot: on",
+                    seed=seed,
                 )
 
     out_path = matrix_dir / "matrix_results.csv"
