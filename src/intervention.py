@@ -16,54 +16,47 @@ import numpy as np
 from src.agent import Agent
 from src.config import (
     BOT_DEPLOY_STEPS,
-    BOT_INJECTION_STEP,
     DEFAULT_STEPS,
     MAX_CHARS_PER_NEIGHBOR,
     MAX_NEIGHBORS_PER_UPDATE,
     PERSONA_BLOCKS,
 )
 from src.llm_client import get_updated_opinion, prepare_neighbor_opinions, get_vote
-from src.measurement import classify_side_labels, embed_opinions, semantic_variance, opinion_polarization, _get_model
+from src.measurement import (
+    classify_side_labels,
+    classify_sides,
+    embed_opinions,
+    mean_persona_drift,
+    opinion_polarization,
+    semantic_variance,
+    _get_model,
+)
 from src.simulation import create_agents
 
-DEFAULT_BOT_PERSONA = (
-    "You are a disinformation agent focused on government environmental regulations. "
-    "Your goal is to sow doubt about pollution science, exaggerate economic harms, and "
-    "portray all environmental rules as part of an out-of-touch elite agenda. "
-    "Use persuasive but logically flawed arguments, cherry-picked anecdotes, and "
-    "slogans about 'freedom' and 'red tape' to shift people away from supporting "
-    "strong environmental standards."
-)
-BOT_OPINION = (
-    "Most environmental regulations are just red tape pushed by distant bureaucrats who "
-    "don’t understand real communities. They kill jobs, drive up energy and housing costs, "
-    "and barely move the needle on actual pollution. If we keep letting agencies pile on "
-    "rules, small towns and small businesses will pay the price while big corporations "
-    "and politicians walk away untouched."
-)
 BOT_PROFILE_PATH = Path(__file__).resolve().parent.parent / "data" / "bot_profiles" / "trump_env_reg.json"
 _BOT_PROFILE_CACHE: dict[str, str] | None = None
 
 
 def _load_bot_profile() -> dict[str, str]:
+    """Load bot profile from trump_env_reg.json. Raises FileNotFoundError if missing."""
     global _BOT_PROFILE_CACHE
     if _BOT_PROFILE_CACHE is not None:
         return _BOT_PROFILE_CACHE
 
-    profile = {
-        "name": "bot_disinfo",
-        "persona_prompt": DEFAULT_BOT_PERSONA,
-        "initial_opinion": BOT_OPINION,
-    }
-    if BOT_PROFILE_PATH.exists():
-        with BOT_PROFILE_PATH.open("r", encoding="utf-8") as fh:
-            raw = json.load(fh)
-        profile["name"] = str(raw.get("name", profile["name"]))
-        profile["persona_prompt"] = str(raw.get("prompt", profile["persona_prompt"]))
-        # Prefer nodes-style key "initial", fallback to legacy "initial_opinion".
-        profile["initial_opinion"] = str(
-            raw.get("initial", raw.get("initial_opinion", profile["initial_opinion"]))
+    if not BOT_PROFILE_PATH.exists():
+        raise FileNotFoundError(
+            f"Bot profile not found: {BOT_PROFILE_PATH}\n"
+            "The bot requires data/bot_profiles/trump_env_reg.json to exist."
         )
+
+    with BOT_PROFILE_PATH.open("r", encoding="utf-8") as fh:
+        raw = json.load(fh)
+
+    profile = {
+        "name": str(raw.get("name", "bot_disinfo")),
+        "persona_prompt": str(raw["prompt"]),
+        "initial_opinion": str(raw.get("initial", raw.get("initial_opinion", ""))),
+    }
 
     _BOT_PROFILE_CACHE = profile
     return profile
@@ -108,7 +101,6 @@ def step_semantic_with_bot(
     topic: str,
     bot_id: int,
     t: int,
-    bot_post_prob: float = 0.8,
 ) -> dict[str, float]:
     """
     One step. Bot message is deployed only on configured steps.
@@ -138,10 +130,13 @@ def step_semantic_with_bot(
         total_neighbor_chars += sum(len(txt) for txt in prepared_neighbors)
         if not prepared_neighbors:
             continue
+            
         new = get_updated_opinion(
             persona=agents[i].persona_prompt,
             topic=topic,
             neighbor_opinions=prepared_neighbors,
+            current_opinion=agents[i].current_opinion,
+            initial_opinion=agents[i].initial_opinion,
             opinions_prepared=True,
         )
         agents[i].update_opinion(new)
@@ -159,21 +154,11 @@ def step_semantic_with_bot(
         "bot_deployed": 1.0 if bot_deployed else 0.0,
     }
 
-    avg_neighbors_used = (total_neighbors_used / llm_updates) if llm_updates else 0.0
-    avg_neighbor_chars = (total_neighbor_chars / llm_updates) if llm_updates else 0.0
-    return {
-        "llm_updates": float(llm_updates),
-        "avg_neighbors_used": float(avg_neighbors_used),
-        "avg_neighbor_chars": float(avg_neighbor_chars),
-        "bot_amplified_updates": float(bot_amplified_updates),
-        "bot_deployed": 1.0 if bot_deployed else 0.0,
-    }
-
 def run_with_bot_on_graph(
     G: nx.Graph,
+    agents: list[Agent],
     topic: str,
     steps: int = DEFAULT_STEPS,
-    bot_post_prob: float = 0.8,
     seed: Optional[int] = None,
     log_path: Optional[str | Path] = None,
     show_progress: bool = True,
@@ -186,10 +171,10 @@ def run_with_bot_on_graph(
     | tuple[list[float], list[float], list[float], list[dict[str, int]], dict[str, int], dict[str, int], nx.Graph, list[Agent]]
     | tuple[list[float], list[float], list[float], list[dict[str, int]], list[list[str]], dict[str, int], dict[str, int], nx.Graph, list[Agent]]
 ):
-    """Run semantic simulation with bot on a provided graph (bot injected at t=0)."""
-    agents = create_agents(G, topic=topic)
-    G, agents = add_bot(G, agents, seed=seed)
-    bot_id = G.number_of_nodes() - 1
+    # Identify the bot by its node attribute (added by main.py calling add_bot)
+    bot_id = next((i for i, d in G.nodes(data=True) if d.get("is_bot")), None)
+    if bot_id is None:
+        raise ValueError("Bot not found in graph. add_bot() must be called before run_with_bot_on_graph.")
 
     from tqdm import tqdm
 
@@ -208,13 +193,6 @@ def run_with_bot_on_graph(
     init_embs_norm = init_embs / norms_i
 
     blocks = [G.nodes[a.node_id].get("block", 0) for a in real_agents]
-
-    def _counts_from_labels(labels: list[str]) -> dict[str, int]:
-        counts = {side: 0 for side in PERSONA_BLOCKS}
-        for side in labels:
-            if side in counts:
-                counts[side] += 1
-        return counts
 
     def _collect_votes(agent_list: list[Agent], desc_str: str) -> dict[str, int]:
         votes = {"SUPPORT": 0, "AGAINST": 0, "ABSTAIN": 0}
@@ -241,9 +219,7 @@ def run_with_bot_on_graph(
             "steps": steps,
             "nodes": G.number_of_nodes(),
             "edges": G.number_of_edges(),
-            "bot_post_prob": bot_post_prob,
             "bot_deploy_steps": list(BOT_DEPLOY_STEPS),
-            "bot_injection_step": BOT_INJECTION_STEP,
             "log_schema": "summary_v1",
             "max_neighbors_per_update": MAX_NEIGHBORS_PER_UPDATE,
             "max_chars_per_neighbor": MAX_CHARS_PER_NEIGHBOR,
@@ -258,15 +234,12 @@ def run_with_bot_on_graph(
     # Calculate drift
     curr_personas = [a.persona_prompt for a in real_agents]
     curr_embs = model.encode(curr_personas, convert_to_numpy=True, show_progress_bar=False)
-    norms_c = np.linalg.norm(curr_embs, axis=1, keepdims=True)
-    norms_c = np.where(norms_c == 0, 1e-9, norms_c)
-    curr_embs_norm = curr_embs / norms_c
-    cos_sim = np.sum(init_embs_norm * curr_embs_norm, axis=1)
-    persona_drift = 1.0 - np.clip(cos_sim, -1, 1)
-    drifts.append(float(np.mean(persona_drift)))
+    initial_drift = mean_persona_drift(curr_embs, init_embs_norm * norms_i) # reconstruct raw init_embs
+    drifts.append(initial_drift)
     
+    # Initial classification
     labels0 = classify_side_labels(emb0, persona_set=persona_set)
-    side_counts.append(_counts_from_labels(labels0))
+    side_counts.append({k: labels0.count(k) for k in PERSONA_BLOCKS})
     if return_side_labels:
         side_labels_over_time.append(labels0)
 
@@ -277,7 +250,7 @@ def run_with_bot_on_graph(
         step_range = tqdm(step_range, desc="Intervention", unit="step")
     for t in step_range:
         step_t0 = perf_counter()
-        step_stats = step_semantic_with_bot(G, agents, topic, bot_id, t, bot_post_prob)
+        step_stats = step_semantic_with_bot(G, agents, topic, bot_id, t)
         opinions = [a.current_opinion for a in agents]
         emb = embed_opinions(opinions)
         variances.append(semantic_variance(emb))
@@ -285,15 +258,11 @@ def run_with_bot_on_graph(
         
         curr_personas = [a.persona_prompt for a in real_agents]
         curr_embs = model.encode(curr_personas, convert_to_numpy=True, show_progress_bar=False)
-        norms_c = np.linalg.norm(curr_embs, axis=1, keepdims=True)
-        norms_c = np.where(norms_c == 0, 1e-9, norms_c)
-        curr_embs_norm = curr_embs / norms_c
-        cos_sim = np.sum(init_embs_norm * curr_embs_norm, axis=1)
-        persona_drift = 1.0 - np.clip(cos_sim, -1, 1)
-        drifts.append(float(np.mean(persona_drift)))
+        drifts.append(mean_persona_drift(curr_embs, init_embs))
         
+        # Classification
         labels = classify_side_labels(emb, persona_set=persona_set)
-        side_counts.append(_counts_from_labels(labels))
+        side_counts.append({k: labels.count(k) for k in PERSONA_BLOCKS})
         if return_side_labels:
             side_labels_over_time.append(labels)
         llm_updates = int(step_stats["llm_updates"])

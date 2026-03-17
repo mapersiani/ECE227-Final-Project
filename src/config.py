@@ -15,15 +15,13 @@ TOPIC = "H.R.6938 - Appropriations Act, 2026. This bill cuts the EPA's budget by
 SEED_LIST = [11]
 DEFAULT_SEED = SEED_LIST[0]
 SIMULATION_STEPS = 10
-DEFAULT_ER_EDGE_PROB = 0.15
-DEFAULT_BOT_POST_PROB = 0.80  # Probability that a bot posts in a given step (vs. remaining silent).
-BOT_INJECTION_STEP = 0
+DEFAULT_ER_EDGE_PROB = 0.10
 BOT_DEPLOY_STEPS = (1, 5, 10)
 # Logging policy: compact per-step summaries only.
 DEFAULT_LOG_MODE = "summary"
 # Prompt budget controls for semantic updates (speed/stability).
-MAX_NEIGHBORS_PER_UPDATE = 6
-MAX_CHARS_PER_NEIGHBOR = 320
+MAX_NEIGHBORS_PER_UPDATE = 12
+MAX_CHARS_PER_NEIGHBOR = 600
 # Persona blocks: party_firstname_lastname naming
 PERSONA_BLOCKS = ("democrat", "republican", "independent")
 PERSONA_BLOCK_LAYOUT = {
@@ -43,6 +41,6 @@ DEFAULT_TOPIC = TOPIC
 DEFAULT_STEPS = SIMULATION_STEPS
 
 # RGG + long-range defaults
-RGG_RADIUS = 0.30 # radius of the RGG graph for local ties
+RGG_RADIUS = 0.20 # radius of the RGG graph for local ties
 LONG_RANGE_FRACTION = 0.30 # fraction of long range neighbors
 LONG_RANGE_K = 2 # max number of long range connection per node

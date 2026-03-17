@@ -70,17 +70,20 @@ def get_updated_opinion(
     persona: str,
     topic: str,
     neighbor_opinions: Sequence[str],
-    memory: str = "",
+    current_opinion: str,
+    initial_opinion: str,
     opinions_prepared: bool = False,
 ) -> str:
     """
     Ask Ollama for an updated opinion given persona, topic, and neighbor opinions.
+    Uses 'Identity Anchoring' (initial_opinion) while maintaining trajectory (current_opinion).
 
     Args:
         persona: Agent's persona prompt
         topic: Discussion topic (e.g. "Government Environmental Regulations")
         neighbor_opinions: List of neighbor opinion texts
-        memory: Optional prior context
+        current_opinion: The agent's opinion from the previous step
+        initial_opinion: The agent's original starting opinion (the anchor)
         opinions_prepared: If True, skip neighbor preprocessing.
 
     Returns:
@@ -91,18 +94,26 @@ def get_updated_opinion(
     else:
         prepared_neighbors = prepare_neighbor_opinions(neighbor_opinions)
     neighbor_text = "\n".join(f"- Neighbor {i + 1}: {o}" for i, o in enumerate(prepared_neighbors))
-    memory_line = f"\nPrevious context or memory: {memory}\n" if memory else ""
+
     prompt = f"""You are simulating an agent in a social network opinion dynamics experiment.
 
 {persona}
 
 The topic under discussion is: {topic}
 
-You have just read the following opinions from your neighbors:
+Your CORE BELIEF at the start of this simulation was:
+"{initial_opinion}"
 
+Your CURRENT POSITION after previous discussions is:
+"{current_opinion}"
+
+You have just read the following NEW opinions from your neighbors:
 {neighbor_text}
-{memory_line}
-In 1-2 concise sentences, state your updated opinion on this topic. Reflect how you are influenced by your neighbors' arguments (or lack thereof), but stay in character. Output only the opinion text, no meta-commentary."""
+
+In 1-2 concise sentences, state your updated opinion on this topic. 
+Reflect how you are influenced by your neighbors' arguments, but ensure your core values (as defined in your persona and initial opinion) remain the anchor. 
+Integrate new information from neighbors into your current position.
+Output only the opinion text, no meta-commentary."""
     return _ollama_generate(prompt)
 
 

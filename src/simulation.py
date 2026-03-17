@@ -18,7 +18,15 @@ import numpy as np
 from src.agent import Agent
 from src.config import DEFAULT_TOPIC, MAX_CHARS_PER_NEIGHBOR, MAX_NEIGHBORS_PER_UPDATE, PERSONA_BLOCKS
 from src.llm_client import get_updated_opinion, prepare_neighbor_opinions, get_vote
-from src.measurement import classify_side_labels, embed_opinions, semantic_variance, opinion_polarization, _get_model
+from src.measurement import (
+    classify_side_labels,
+    classify_sides,
+    embed_opinions,
+    mean_persona_drift,
+    semantic_variance,
+    opinion_polarization,
+    _get_model
+)
 
 
 def create_agents(G: nx.Graph, topic: str = DEFAULT_TOPIC) -> List[Agent]:
@@ -69,11 +77,15 @@ def step_semantic(
         total_neighbor_chars += sum(len(txt) for txt in prepared_neighbors)
         if not prepared_neighbors:
             continue
+            
+        
+        
         new = get_updated_opinion(
             persona=agents[i].persona_prompt,
             topic=topic,
             neighbor_opinions=prepared_neighbors,
-            memory=memory,
+            current_opinion=agents[i].current_opinion,
+            initial_opinion=agents[i].initial_opinion,
             opinions_prepared=True,
         )
         agents[i].update_opinion(new)
@@ -110,12 +122,7 @@ def run_semantic(
     """
     from tqdm import tqdm
 
-    def _counts_from_labels(labels: list[str]) -> dict[str, int]:
-        counts = {side: 0 for side in PERSONA_BLOCKS}
-        for side in labels:
-            if side in counts:
-                counts[side] += 1
-        return counts
+
 
     def _collect_votes(agent_list: list[Agent], desc_str: str) -> dict[str, int]:
         votes = {"SUPPORT": 0, "AGAINST": 0, "ABSTAIN": 0}
@@ -170,15 +177,11 @@ def run_semantic(
     # Calculate drift
     curr_personas = [a.persona_prompt for a in real_agents]
     curr_embs = model.encode(curr_personas, convert_to_numpy=True, show_progress_bar=False)
-    norms_c = np.linalg.norm(curr_embs, axis=1, keepdims=True)
-    norms_c = np.where(norms_c == 0, 1e-9, norms_c)
-    curr_embs_norm = curr_embs / norms_c
-    cos_sim = np.sum(init_embs_norm * curr_embs_norm, axis=1)
-    persona_drift = 1.0 - np.clip(cos_sim, -1, 1)
-    drifts.append(float(np.mean(persona_drift)))
+    drifts.append(mean_persona_drift(curr_embs, init_embs))
 
+    # Initial classification
     labels0 = classify_side_labels(emb0, persona_set=persona_set)
-    side_counts.append(_counts_from_labels(labels0))
+    side_counts.append({k: labels0.count(k) for k in PERSONA_BLOCKS})
     if return_side_labels:
         side_labels_over_time.append(labels0)
 
@@ -197,15 +200,11 @@ def run_semantic(
 
         curr_personas = [a.persona_prompt for a in real_agents]
         curr_embs = model.encode(curr_personas, convert_to_numpy=True, show_progress_bar=False)
-        norms_c = np.linalg.norm(curr_embs, axis=1, keepdims=True)
-        norms_c = np.where(norms_c == 0, 1e-9, norms_c)
-        curr_embs_norm = curr_embs / norms_c
-        cos_sim = np.sum(init_embs_norm * curr_embs_norm, axis=1)
-        persona_drift = 1.0 - np.clip(cos_sim, -1, 1)
-        drifts.append(float(np.mean(persona_drift)))
+        drifts.append(mean_persona_drift(curr_embs, init_embs))
         
+        # Classification
         labels = classify_side_labels(emb, persona_set=persona_set)
-        side_counts.append(_counts_from_labels(labels))
+        side_counts.append({k: labels.count(k) for k in PERSONA_BLOCKS})
         if return_side_labels:
             side_labels_over_time.append(labels)
         llm_updates = int(step_stats["llm_updates"])

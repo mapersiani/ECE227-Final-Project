@@ -6,7 +6,7 @@ from typing import Optional
 
 import networkx as nx
 
-from src.config import side_from_name
+from src.config import PERSONA_BLOCK_LAYOUT, side_from_name
 from src.load_nodes import load_nodes
 
 
@@ -25,7 +25,7 @@ def create_er_graph(
 
     Returns:
         NetworkX Graph with one node per persona and attributes:
-        - name, prompt, style, initial_text, side (democrat/republican/independent)
+        - name, prompt, style, initial_text, side, block (democrat/republican/independent)
     """
     nodes = load_nodes(persona_set)
     n = len(nodes)
@@ -35,12 +35,14 @@ def create_er_graph(
     for i, node in enumerate(nodes):
         name = node.get("name", f"node_{i}")
         side = side_from_name(name)
+        block = PERSONA_BLOCK_LAYOUT[side][0] if side in PERSONA_BLOCK_LAYOUT else 0
         attrs[i] = {
             "name": name,
             "prompt": node.get("prompt", ""),
             "style": node.get("style", ""),
             "initial_text": node.get("initial", ""),
             "side": side,
+            "block": block,
         }
     nx.set_node_attributes(G, attrs)
     return G

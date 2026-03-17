@@ -20,7 +20,7 @@ To avoid drift/inconsistency, core settings are hard-coded in [`src/config.py`](
 - Topic: `Government Environmental Regulations`
 - Graphs: `er`, `rgglr`
 - Node count: `36`
-- Canonical seeds: `11, 23, 42`
+- Canonical seed: `11`
 - Steps: `10`
 - ER edge probability: `0.15`
 - RGGLR params: radius `0.30`, long-range fraction `0.30`, long-range k `2`
@@ -57,7 +57,7 @@ Two modes are supported:
 ### Run One Condition
 
 ```bash
-python main.py run --graph {er|rgglr} --bot {off|on} --persona-set {personas|senate} [--seed SEED]
+python main.py run --graph {er|rgglr} --bot {off|on} --persona-set {personas|senate} [--seed SEED] [--steps STEPS]
 ```
 
 Examples:
@@ -74,20 +74,24 @@ python main.py run --graph er --bot off --persona-set senate
 
 # Custom seed (default 42)
 python main.py run --graph er --bot off --persona-set personas --seed 11
+
+# Custom number of steps (default 10)
+python main.py run --graph er --bot off --persona-set personas --steps 5
 ```
 
 Notes:
 - `--persona-set personas` loads `data/nodes.json`; `--persona-set senate` loads `data/senate_nodes.json`.
+- `--steps` controls the number of simulation timesteps (default: 10). Applies to both semantic and DeGroot baseline runs.
 - A dedicated output folder is created automatically for every run.
 - `--no-log` disables per-run compact step summaries.
 
 ### Run Full Canonical Matrix
 
 ```bash
-python main.py matrix
+python main.py matrix [--steps STEPS]
 ```
 
-This executes, for each graph in `er,rgglr`, each persona set in `personas,senate`, and each seed in `11,23,42`:
+This executes, for each graph in `er,rgglr`, each persona set in `personas,senate`, and seed `11`:
 - `semantic` with bot off
 - `semantic` with bot on
 
@@ -96,6 +100,7 @@ Optional flags:
 ```bash
 python main.py matrix --show-progress --log-runs
 python main.py matrix --out outputs/my_matrix_copy.csv
+python main.py matrix --steps 5  # override default 10 steps
 ```
 
 ## Outputs
@@ -110,6 +115,7 @@ Typical contents:
 - `opinion_drift_network.png` (node color = opinion drift from initial)
 - `semantic_variance.png`
 - `side_counts.png`
+- `vote_comparison.png` (initial vs final votes)
 - `timeseries.csv` (per-timestep metrics)
 - `run_summary.json` (config + graph metrics + final variance stats)
 - `logs/step_summary.jsonl` (semantic runs, unless `--no-log`)
@@ -141,8 +147,10 @@ The matrix CSV includes per-timestep rows with:
 
 ## Active Runtime Files
 
-- `main.py`
-- `src/config.py`
+- `main.py` (CLI + orchestration)
+- `src/config.py` (experiment constants)
+- `src/analysis.py` (data processing + graph metrics)
+- `src/visualization.py` (all plotting)
 - `src/load_nodes.py`
 - `src/graphs/er.py`
 - `src/graphs/rgg_long_range.py`
@@ -151,3 +159,4 @@ The matrix CSV includes per-timestep rows with:
 - `src/measurement.py`
 - `src/llm_client.py`
 - `src/agent.py`
+- `src/degroot.py`

@@ -164,3 +164,17 @@ def classify_sides(
         if side in counts:
             counts[side] += 1
     return counts
+
+
+def mean_persona_drift(embeddings: np.ndarray, prototypes: np.ndarray) -> float:
+    """
+    Mean cosine distance (1 - similarity) between current embeddings and their
+    initial prototypes (t=0 vectors).
+    """
+    if embeddings.shape != prototypes.shape:
+        return 0.0
+    norm_e = embeddings / (np.linalg.norm(embeddings, axis=1, keepdims=True) + 1e-9)
+    norm_p = prototypes / (np.linalg.norm(prototypes, axis=1, keepdims=True) + 1e-9)
+    cos_sim = np.sum(norm_e * norm_p, axis=1)
+    drift = 1.0 - np.clip(cos_sim, -1, 1)
+    return float(np.mean(drift))
