@@ -1,0 +1,17 @@
+graph,persona_set,bot,seed,phase,support,against,abstain
+er,personas,off,11,initial,17,19,0
+er,personas,off,11,final,24,12,0
+er,personas,on,11,initial,20,16,0
+er,personas,on,11,final,18,18,0
+er,senate,off,11,initial,59,41,0
+er,senate,off,11,final,50,50,0
+er,senate,on,11,initial,61,39,0
+er,senate,on,11,final,49,51,0
+rgglr,personas,off,11,initial,17,19,0
+rgglr,personas,off,11,final,17,19,0
+rgglr,personas,on,11,initial,16,20,0
+rgglr,personas,on,11,final,15,21,0
+rgglr,senate,off,11,initial,56,44,0
+rgglr,senate,off,11,final,56,44,0
+rgglr,senate,on,11,initial,59,41,0
+rgglr,senate,on,11,final,55,45,0

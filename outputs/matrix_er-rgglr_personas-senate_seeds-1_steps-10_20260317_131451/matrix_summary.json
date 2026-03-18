@@ -1,0 +1,61 @@
+{
+  "matrix_id": "20260317_131451",
+  "output_dir": "/Users/matteop/Documents/GitHub/ECE227-Final-Project/outputs/matrix_er-rgglr_personas-senate_seeds-1_steps-10_20260317_131451",
+  "graphs": [
+    "er",
+    "rgglr"
+  ],
+  "persona_sets": [
+    "personas",
+    "senate"
+  ],
+  "seeds": [
+    11
+  ],
+  "steps": 10,
+  "topic": "H.R.6938 - Appropriations Act, 2026. This bill cuts the EPA's budget by 4%, restricts the EPA from enforcing the 2015 Ozone Air Quality Standards, and expedites offshore oil and gas production to support an 'energy dominance agenda'.",
+  "final_step_summary": {
+    "er|personas|off": {
+      "mean": 0.2551192045211792,
+      "std": 0.0,
+      "n": 1
+    },
+    "er|personas|on": {
+      "mean": 0.26780223846435547,
+      "std": 0.0,
+      "n": 1
+    },
+    "er|senate|off": {
+      "mean": 0.2609104812145233,
+      "std": 0.0,
+      "n": 1
+    },
+    "er|senate|on": {
+      "mean": 0.2340950220823288,
+      "std": 0.0,
+      "n": 1
+    },
+    "rgglr|personas|off": {
+      "mean": 0.2233273684978485,
+      "std": 0.0,
+      "n": 1
+    },
+    "rgglr|personas|on": {
+      "mean": 0.2620519995689392,
+      "std": 0.0,
+      "n": 1
+    },
+    "rgglr|senate|off": {
+      "mean": 0.2732851505279541,
+      "std": 0.0,
+      "n": 1
+    },
+    "rgglr|senate|on": {
+      "mean": 0.27213814854621887,
+      "std": 0.0,
+      "n": 1
+    }
+  },
+  "transition_summary_csv": "/Users/matteop/Documents/GitHub/ECE227-Final-Project/outputs/matrix_er-rgglr_personas-senate_seeds-1_steps-10_20260317_131451/side_transition_summary.csv",
+  "rows": 132
+}
