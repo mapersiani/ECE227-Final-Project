@@ -6,27 +6,28 @@ The focus is on the effect of different graph structures (ER vs RGGLR).
 
 Personas and initial opinions come from node files in `data/`. Use `--persona-set` to choose which file:
 
-- `personas` (default) → `data/nodes.json`
+- `personas` → `data/nodes.json`
 - `senate` → `data/senate_nodes.json`
 
 ## Documentation
 
+- [Final Project Report (PDF)](docs/Report%20ECE227/report.pdf)
 - [Project Architecture & Run Flow](docs/architecture.md)
 - [Matrix Run Execution Loop](docs/matrix_flow.md)
 
 ## Canonical Experiment Design
 
 To avoid drift/inconsistency, core settings are hard-coded in [`src/config.py`](src/config.py):
-- Topic: `Government Environmental Regulations`
+- Topic: `H.R.6938 - Appropriations Act, 2026. This bill cuts the EPA's budget by 4%, restricts the EPA from enforcing the 2015 Ozone Air Quality Standards, and expedites offshore oil and gas production to support an 'energy dominance agenda'.`
 - Graphs: `er`, `rgglr`
 - Node count: `36`
 - Canonical seed: `11`
 - Steps: `10`
-- ER edge probability: `0.15`
-- RGGLR params: radius `0.30`, long-range fraction `0.30`, long-range k `2`
+- ER edge probability: `0.10`
+- RGGLR params: radius `0.20`, long-range fraction `0.30`, long-range k `2`
 - Bot injection step: `t=0`
 - Log mode: compact per-step summary (`summary`)
-- Prompt budget: max `6` neighbor opinions, max `320` chars per neighbor (for faster run. Can be changed)
+- Prompt budget: max `12` neighbor opinions, max `600` chars per neighbor (for faster run. Can be changed)
 
 ## Setup
 
@@ -144,6 +145,16 @@ The matrix CSV includes per-timestep rows with:
 - semantic side counts: `democrat_count`, `republican_count`, `independent_count`
 - graph structure fields: node/edge counts, degree stats, density, components, isolates, local vs long-range edges
 - `bot_degree` for bot-on rows
+
+## Key Findings (Project Report Summary)
+
+Experimental results reveal that **network topology** is the primary driver of opinion resilience:
+
+- **ER (Erdős-Rényi) Networks**: These random-mixing graphs exhibit lower overall polarization but are highly susceptible to individual drift. A single partisan bot can successfully neutralize a strong group consensus in an ER network.
+- **RGGLR (Random Geometric Graph with Long Range) Networks**: These clustered graphs exhibit "structural resilience." Because opinions are locally reinforced, the same bot intervention has almost no effect on the aggregate voting outcomes.
+- **Semantic Stability**: Unlike classical DeGroot models which collapse to a single mean, our LLM-backed semantic framework captures persistent, reasoned disagreement, stabilizing at a realistic "polarization floor."
+
+For more details, see the [Final Report](docs/Report%20ECE227/main.pdf).
 
 ## Active Runtime Files
 
