@@ -11,7 +11,7 @@ Personas and initial opinions come from node files in `data/`. Use `--persona-se
 
 ## Documentation
 
-- [Final Project Report (PDF)](docs/Report%20ECE227/report.pdf)
+- [Final Project Report (PDF)](docs/report.pdf)
 - [Project Architecture & Run Flow](docs/architecture.md)
 - [Matrix Run Execution Loop](docs/matrix_flow.md)
 
